@@ -50,7 +50,8 @@ Works on Windows, Android, macOS, Linux and ChromeOS. **Does not work on iOS** (
 
 Tested and confirmed working on:
 
-- **LIJIUJIA LJJ-0811FE** walking pad
+- **LIJIUJIA LJJ-0811FE** walking pad (startup strategy "LJJ")
+- **RUNimon** treadmill, Bluetooth name `FS-E30107` (startup strategy "FitShow standard") — Start/Stop/Restart implemented per the FitShow protocol; awaiting confirmation on hardware
 
 Should work with any treadmill exposing the FitShow BLE service (UUID `0xFFF0`), including many rebranded walking pads sold under various Amazon/AliExpress generic brands. If the Bluetooth name starts with `FS-` or `LJJ-` and the official FitShow app works with it, this web app likely will too.
 
@@ -100,10 +101,13 @@ Once connected, the app starts polling the treadmill every 500 ms to read its st
 
 ### Starting and stopping
 
-- **▶ Start**: initiates the treadmill at the speed shown in the slider. Internally sends a Wake command followed by a Speed command, with a second Speed confirmation 1.5 seconds later to override the treadmill's default starting speed.
-- **⏹ Stop**: halts the belt immediately.
+- **▶ Start**: starts the treadmill and then applies the speed shown in the slider. The command sequence depends on the **startup strategy** (selector under the speed controls):
+  - **Auto** (default): `LJJ-…` names use the LJJ strategy, everything else uses FitShow standard.
+  - **FitShow standard** (RUNimon `FS-E30107` and most `FS-…` devices): sends the dedicated Start/Resume command `53 01`, waits until the treadmill reports *running* (after its 3-2-1 countdown), then sends the target speed. If the treadmill does not report a start within 10 s, the app gives up — it **never retries a start automatically**.
+  - **LJJ-0811FE**: sends Wake (`44 01`) followed by Set Speed (`53 02`), with one speed confirmation 1.5 s later.
+- **⏹ Stop**: has priority over everything — it cancels a start in progress, discards queued speed changes and is written immediately (no waiting for the next poll). If the treadmill still reports *running* 2 s later, Stop is re-sent (3 attempts maximum).
 
-After a stop, you can click Start again without any additional setup. The previously selected speed is remembered.
+The running state shown in the app always comes from the treadmill's own status frames, not from the buttons pressed. After a stop, you can click Start again without any additional setup. The previously selected speed is remembered. Changing the speed while the belt is stopped only updates the setpoint; it never starts the belt.
 
 ### Controlling speed
 
@@ -164,7 +168,7 @@ Platform notes:
 
 ### Wake button and deep sleep
 
-The **⏰ Wake** button sends a wake command (`02 44 01`) to the treadmill. Useful if:
+The **⏰ Wake** button sends a wake command (`02 44 01`) to the treadmill. This command is specific to the LJJ-0811FE; standard FitShow treadmills such as the RUNimon do not need it. Useful if:
 
 - The treadmill shows no response to Start but the Bluetooth connection is still alive
 - The treadmill was idle for a while and seems locked
@@ -194,15 +198,27 @@ A **🔍 Debug trame running** panel under the metrics shows the last status fra
 
 ```
 .
-├── index.html       # Full application (HTML + CSS + JS inline)
-├── manifest.json    # PWA manifest
-├── sw.js            # Service worker (required for PWA install)
-├── icon-192.png     # 192×192 icon
-├── icon-512.png     # 512×512 icon
-└── README.md        # This file
+├── index.html          # UI (HTML + CSS + Web Bluetooth wiring)
+├── treadmill-core.js   # FitShow protocol: frames, command queue, start strategies, Stop
+├── manifest.json       # PWA manifest
+├── sw.js               # Service worker (network-first, offline fallback)
+├── icon-192.png        # 192×192 icon
+├── icon-512.png        # 512×512 icon
+├── package.json        # test scripts only (no runtime dependency)
+├── test/               # automated tests with simulated treadmills
+└── README.md           # This file
 ```
 
-Single-page app, no build step, no npm dependencies. Everything is readable and editable directly in `index.html`.
+No build step, no runtime dependencies. `treadmill-core.js` has no DOM or Bluetooth code, so it can be tested in Node.
+
+### Tests
+
+```bash
+npm test          # protocol/queue/start-stop tests (Node 18+, no install needed)
+npm run test:ui   # optional: index.html in headless Chromium with a fake Bluetooth device (needs Playwright)
+```
+
+The tests use simulated treadmills (FitShow standard and LJJ-0811FE). They check the byte sequences and timing logic; they cannot prove the physical treadmill behaves the same way.
 
 ---
 
@@ -228,18 +244,42 @@ The treadmill uses a proprietary variant of the **FitShow** BLE protocol, close 
 - `checksum` = XOR of all bytes **between** the start byte and the checksum (exclusive of both)
 - `0x03` = end of frame
 
-### Commands (LJJ-0811FE specific)
+### Commands
 
-| Action | Frame (excluding checksum and 0x03) |
+| Action | Frame (excluding checksum and 0x03) | Notes |
+|---|---|---|
+| Status (heartbeat) | `02 51` | every 500 ms |
+| Start / Resume | `02 53 01 [sport ID ×4] [mode] [blocks] [value ×2]` | all zero = free run. Full frame: `02 53 01 00 00 00 00 00 00 00 00 52 03` |
+| Set speed / incline target | `02 53 02 [speed×10] [incline]` | reply reports the **actual** speed (`02 53 02 00 00 51 03` when the belt is stopped) |
+| Stop | `02 53 03` | full frame `02 53 03 50 03` |
+| Pause | `02 53 06` | resumed with Start `53 01` |
+| Query speed range | `02 50 02` | reply `02 50 02 [max] [min] [unit] cs 03` |
+| Query incline range | `02 50 03` | |
+| **Wake** (LJJ-0811FE only) | `02 44 01` | not part of standard FitShow |
+
+Responses are matched to the command by opcode + sub-command only (never by parameters), because the speed reply reports the actual speed rather than the requested one. Status frames are always processed, whether they answer a poll or not.
+
+### Startup strategies
+
+- **FitShow standard** (RUNimon `FS-E30107`): `53 01` → status *countdown* (`51 02 [s]`) → status *running* (`51 03 …`) → `53 02 [target]`. Sending `53 02` while the belt is stopped does nothing on these treadmills (the reply reports speed 0), which is why the old Wake + Speed sequence could not start them.
+- **LJJ-0811FE**: the official Start (`53 01`) is **ignored**; `44 01` (Wake) followed by `53 02 [speed]` starts the belt.
+
+The strategy is picked from the Bluetooth name or forced in the UI.
+
+### Status codes (`02 51 [code] …`)
+
+| Code | Meaning |
 |---|---|
-| Status (heartbeat) | `02 51` |
-| **Wake** (required before Start) | `02 44 01` |
-| Stop | `02 53 03` |
-| Set speed / start moving | `02 53 02 [speed×10] [incline]` |
-| Query speed range | `02 50 02` |
-| Query incline range | `02 50 03` |
+| `00` | idle |
+| `01` | session ended |
+| `02` | start countdown (next byte = seconds left) |
+| `03` | running |
+| `04` | stopping / decelerating (the LJJ-0811FE also sends it while running) |
+| `05` | error |
+| `06` | safety key removed |
+| `0A` | paused |
 
-> ⚠️ **Key difference from standard FitShow**: the official Start command (`02 53 01 00 00 00 00 00`) is **ignored** by this treadmill. Instead, you must send `WAKE` followed by the Set Speed command with your target speed.
+A belt is considered running when the code is `03`, or when a full 17-byte frame reports a speed above 0.
 
 ### Mandatory Polling
 
@@ -250,7 +290,7 @@ The firmware expects a **heartbeat** every 500 ms (`02 51`). Without this pollin
 ```
 [0]  0x02                      start
 [1]  0x51                      opcode status
-[2]  0x04                      (state code)
+[2]  state code                (see table above)
 [3]  speed×10                  current speed in 0.1 km/h
 [4]  incline                   current incline
 [5..6] time (LE)               elapsed seconds
@@ -292,7 +332,7 @@ Everything is in `index.html`, so grepping for the relevant keyword will take yo
 |---|---|---|
 | Treadmill doesn't appear in the Bluetooth picker | Already paired with another device | Close FitShow on other devices, remove from OS Bluetooth settings |
 | "Pas de service FitShow 0xFFF0" error | Wrong device selected or treadmill in deep sleep | Select the right device / verify screen is on |
-| Start sent but treadmill doesn't move | Deep sleep mode | Wait for spontaneous wake (no BLE solution exists) |
+| Start sent but treadmill doesn't move | Wrong startup strategy, safety key, or deep sleep | Check the "Démarrage" selector (FitShow standard for `FS-…`, LJJ for `LJJ-…`), insert the safety key, then wait for spontaneous wake if the screen is off |
 | Commands work but speed is stuck at minimum | The treadmill ignored the setpoint briefly | Wait for the 1.5s auto-reconfirm, or click Start again |
 | Install banner never appears | Service worker not registered, or already installed, or non-HTTPS | Open F12 → Application → Manifest and check for errors |
 | PWA installed but no badge on Windows taskbar | App opened in browser tab, not standalone | Close the browser tab and launch via the installed app icon instead |

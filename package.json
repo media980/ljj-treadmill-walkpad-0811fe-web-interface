@@ -1,0 +1,10 @@
+{
+  "name": "ljj-treadmill-walkpad-web-interface",
+  "private": true,
+  "description": "Web Bluetooth control for FitShow treadmills (LJJ-0811FE, RUNimon FS-E30107)",
+  "scripts": {
+    "test": "node --test test/treadmill-core.test.js",
+    "test:ui": "node test/ui.smoke.js"
+  },
+  "license": "MIT"
+}

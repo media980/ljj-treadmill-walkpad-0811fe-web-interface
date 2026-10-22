@@ -120,12 +120,13 @@
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
   details { margin-top: 8px; }
   summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 12px; max-width: 100%; }
 </style>
 </head>
 <body>
 
 <h1>🏃 Tapis LJJ — Contrôle</h1>
-<div class="sub">Protocole FitShow adapté pour LJJ-0811FE (LIJIUJIA et compatibles)</div>
+<div class="sub">Protocole FitShow — LJJ-0811FE (LIJIUJIA), RUNimon FS-E30107 et compatibles</div>
 
 <!-- Bannière installation PWA -->
 <div id="install-banner" style="display:none;background:var(--accent);color:#000;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:14px;font-weight:600;">
@@ -179,6 +180,15 @@
     <div class="hint">
       La commande de vitesse n'est envoyée que lorsque le tapis est en marche (après Start).
     </div>
+    <div class="hint">
+      <label>Démarrage :
+        <select id="strategy">
+          <option value="auto">Auto (selon le nom Bluetooth)</option>
+          <option value="fitshow">FitShow standard — Start 53 01 (RUNimon, FS-…)</option>
+          <option value="ljj">LJJ-0811FE — Wake + vitesse</option>
+        </select>
+      </label>
+    </div>
   </div>
 
   <!-- MÉTRIQUES -->
@@ -224,57 +234,21 @@
 
 </div>
 
+<script src="treadmill-core.js"></script>
 <script>
 // =======================================================
-//  Protocole FitShow
-//  Source : https://github.com/tyge68/fitshow-treadmill
+//  Protocole FitShow : voir treadmill-core.js
+//  (trames, file de commandes, stratégies de démarrage, Stop prioritaire)
 // =======================================================
 const FS_SERVICE = '0000fff0-0000-1000-8000-00805f9b34fb';
 const FS_READ    = '0000fff1-0000-1000-8000-00805f9b34fb'; // notify
 const FS_WRITE   = '0000fff2-0000-1000-8000-00805f9b34fb'; // write
-
-// Commandes (sans checksum ni 0x03 de fin, ajoutés automatiquement)
-// Protocole adapté pour LJJ-0811FE (découvert par reverse-engineering)
-const CMD = {
-  STATUS:         [0x02, 0x51],                              // heartbeat / request current state
-  WAKE:           [0x02, 0x44, 0x01],                        // déverrouille le tapis
-  STOP:           [0x02, 0x53, 0x03],
-  SPEED_INFO:     [0x02, 0x50, 0x02],                        // read min/max/unit speed
-  INCLINE_INFO:   [0x02, 0x50, 0x03],
-  TOTAL_INFO:     [0x02, 0x50, 0x04],
-  // START/SET_SPEED : [0x02, 0x53, 0x02, speed*10, incline]
-  // Sur LJJ-0811FE, SPEED sert aussi de Start si le tapis est à l'arrêt
-};
-const MSG_END = 0x03;
 const POLL_INTERVAL_MS = 500;
-const MAX_RETRIES = 5;
 
-// =======================================================
-//  État
-// =======================================================
-const state = {
-  device: null,
-  server: null,
-  charRead: null,
-  charWrite: null,
-  connected: false,
-  running: false,
-  speed: 0,
-  incline: 0,
-  setpoint: 1.0,
-  minSpeed: 1,
-  maxSpeed: 8,
-  unitSpeed: 10,     // vitesse en km/h = value / unitSpeed
-  messageQueue: [],
-  lastMessage: null,
-  retries: MAX_RETRIES,
-  pollHandle: null,
-  // Timer local (le protocole ne semble pas exposer directement le temps)
-  startTime: null,
-  elapsed: 0,
-  distance: 0,
-  lastTick: null,
-};
+const { TreadmillController } = window.TreadmillCore;
+
+// Objets Web Bluetooth
+const ble = { device: null, server: null, charRead: null, charWrite: null, pollHandle: null };
 
 // =======================================================
 //  Helpers
@@ -361,21 +335,96 @@ const dvToBytes = dv => {
   return out;
 };
 
-// Checksum FitShow : XOR de tous les octets à partir de l'index 1 (on saute le 0x02)
-function checksum(bytes) {
-  let cs = 0;
-  for (let i = 1; i < bytes.length; i++) cs ^= bytes[i];
-  return cs;
+// Stratégie de démarrage mémorisée (auto / fitshow / ljj)
+function loadStrategyPref() {
+  try { return localStorage.getItem('start-strategy') || 'auto'; } catch { return 'auto'; }
+}
+function saveStrategyPref(v) {
+  try { localStorage.setItem('start-strategy', v); } catch {}
 }
 
-// Construit une trame complète : [bytes..., checksum, 0x03]
-function buildFrame(bytes) {
-  const cs = checksum(bytes);
-  const frame = new Uint8Array(bytes.length + 2);
-  frame.set(bytes, 0);
-  frame[bytes.length] = cs;
-  frame[bytes.length + 1] = MSG_END;
-  return frame;
+// =======================================================
+//  Contrôleur (état dérivé des réponses réelles du tapis)
+// =======================================================
+const ctl = new TreadmillController({
+  write: frame => ble.charWrite.writeValue(frame),
+  log,
+  onUpdate: kind => onControllerUpdate(kind),
+});
+const state = ctl.state;
+
+const PHASE_LABELS = {
+  disconnected: 'non connecté',
+  unknown: 'connecté',
+  stopped: 'arrêté',
+  starting: 'démarrage demandé…',
+  countdown: 'démarrage imminent',
+  running: 'en marche',
+  stopping: 'arrêt en cours…',
+  paused: 'en pause',
+  safety: '⚠️ clé de sécurité retirée',
+  error: '⚠️ erreur tapis',
+};
+
+function onControllerUpdate(kind) {
+  if (kind === 'range') {
+    $('speed-slider').min = state.minSpeed / 10;
+    $('speed-slider').max = state.maxSpeed / 10;
+    $('speed-setpoint').textContent = state.setpoint.toFixed(1);
+    $('speed-slider').value = state.setpoint;
+    return;
+  }
+  let label = PHASE_LABELS[state.phase] || state.phase;
+  if (state.phase === 'countdown' && state.countdown != null) label = `démarrage dans ${state.countdown} s`;
+  if (!state.deepSleepWarned) $('tapis-status').textContent = `État : ${label}`;
+
+  const st = state.lastStatus;
+  if (st && st.full) {
+    syncSpeedUI(st.speed);
+    checkDeepSleep(st);
+    renderDebugFrame(state.lastStatusBytes, st);
+  }
+  if (!state.running && state.phase === 'stopped') releaseWakeLock();
+  updateMetrics();
+}
+
+// Détection heuristique de la veille profonde (LJJ-0811FE) :
+// trame complète tout à zéro alors qu'un démarrage a été demandé il y a > 5 s
+function checkDeepSleep(st) {
+  if (state.strategy !== 'ljj') return;
+  const looksDeepSleep = st.speed === 0 && st.elapsed === 0 && st.distanceRaw === 0 && st.caloriesRaw === 0;
+  if (looksDeepSleep && state.startRequestedAt) {
+    const since = Date.now() - state.startRequestedAt;
+    if (since > 5000 && !state.deepSleepWarned) {
+      log('⚠️ Le tapis semble en veille profonde. Essayez une action physique sur le tapis (tap, marcher dessus, télécommande) pour le réveiller.', 'err');
+      $('tapis-status').innerHTML = '⚠️ <b>Veille profonde détectée</b> — action physique requise sur le tapis';
+      state.deepSleepWarned = true;
+    }
+  }
+}
+
+// Debug : trame STATUS décortiquée
+function renderDebugFrame(bytes, st) {
+  const el = $('debug-frame');
+  if (!el || !bytes) return;
+  let debugStr = 'Octets :\n';
+  for (let i = 0; i < bytes.length; i++) {
+    const v = bytes[i];
+    debugStr += `  [${i.toString().padStart(2, '0')}] 0x${v.toString(16).padStart(2, '0')} = ${v.toString().padStart(3)}`;
+    if (i === 2) debugStr += ` ← code état (${state.phase})`;
+    else if (i === 3) debugStr += ` ← vitesse = ${v/10} km/h`;
+    else if (i === 4) debugStr += ` ← incline = ${v}`;
+    else if (i === 5) debugStr += ` ← temps_lo (${st.elapsed}s)`;
+    else if (i === 6) debugStr += ` ← temps_hi`;
+    else if (i === 7) debugStr += ` ← dist_lo (${st.distanceRaw} = ${st.distance.toFixed(2)} km)`;
+    else if (i === 8) debugStr += ` ← dist_hi`;
+    else if (i === 9) debugStr += ` ← cal_lo (${st.caloriesRaw}/10 = ${st.calories.toFixed(1)} kcal)`;
+    else if (i === 10) debugStr += ` ← cal_hi`;
+    else if (i === bytes.length - 2) debugStr += ` ← checksum`;
+    else if (i === bytes.length - 1) debugStr += ` ← fin 0x03`;
+    debugStr += '\n';
+  }
+  el.textContent = debugStr;
 }
 
 // =======================================================
@@ -392,34 +441,33 @@ async function connect() {
       optionalServices: [FS_SERVICE, 0x1826, 'device_information', 'battery_service'],
     });
     log(`Appareil : ${device.name || '(sans nom)'} — ${device.id}`);
-    state.device = device;
+    ble.device = device;
     device.addEventListener('gattserverdisconnected', onDisconnected);
 
     setStatus('Connexion...', 'warn');
-    state.server = await device.gatt.connect();
+    ble.server = await device.gatt.connect();
     log('Serveur GATT connecté', 'rx');
 
-    const svc = await state.server.getPrimaryService(FS_SERVICE);
+    const svc = await ble.server.getPrimaryService(FS_SERVICE);
     log(`Service FitShow 0xFFF0 trouvé ✓`, 'rx');
 
-    state.charRead = await svc.getCharacteristic(FS_READ);
-    await state.charRead.startNotifications();
-    state.charRead.addEventListener('characteristicvaluechanged', onNotification);
+    ble.charRead = await svc.getCharacteristic(FS_READ);
+    await ble.charRead.startNotifications();
+    ble.charRead.addEventListener('characteristicvaluechanged', onNotification);
     log('Notifications 0xFFF1 activées', 'info');
 
-    state.charWrite = await svc.getCharacteristic(FS_WRITE);
+    ble.charWrite = await svc.getCharacteristic(FS_WRITE);
     log('Canal write 0xFFF2 prêt', 'info');
 
-    state.connected = true;
     setStatus(device.name || 'Connecté', 'ok');
     $('btn-connect').disabled = true;
     $('btn-disconnect').disabled = false;
     enableControls(true);
 
-    // Initialisation : demande les infos vitesse/incline puis boucle de polling
-    queueMessage(CMD.SPEED_INFO);
-    queueMessage(CMD.INCLINE_INFO);
-    state.pollHandle = setInterval(pollTick, POLL_INTERVAL_MS);
+    // Initialisation : infos vitesse/incline puis boucle de polling (heartbeat)
+    ctl.attach(device.name, $('strategy').value);
+    state.deepSleepWarned = false;
+    ble.pollHandle = setInterval(() => ctl.tick(), POLL_INTERVAL_MS);
 
   } catch (e) {
     if (e.name === 'NotFoundError') {
@@ -435,11 +483,8 @@ async function connect() {
 function onDisconnected() {
   log('Déconnecté du tapis', 'err');
   setStatus('Déconnecté', 'err');
-  state.connected = false;
-  state.running = false;
-  if (state.pollHandle) { clearInterval(state.pollHandle); state.pollHandle = null; }
-  state.lastMessage = null;
-  state.messageQueue = [];
+  if (ble.pollHandle) { clearInterval(ble.pollHandle); ble.pollHandle = null; }
+  ctl.reset();
   releaseWakeLock();
   $('btn-connect').disabled = false;
   $('btn-disconnect').disabled = true;
@@ -448,212 +493,17 @@ function onDisconnected() {
 }
 
 async function disconnect() {
-  if (state.connected) {
-    // Envoyer Stop par politesse
-    try { await writeFrame(CMD.STOP); } catch {}
+  if (state.connected && state.running) {
+    // Arrêter la bande avant de couper la liaison
+    try { await ctl.stop(); } catch {}
   }
-  if (state.device?.gatt?.connected) state.device.gatt.disconnect();
-}
-
-// =======================================================
-//  Write / Notifications
-// =======================================================
-async function writeFrame(bytes) {
-  const frame = buildFrame(bytes);
-  log(`TX : ${hex(frame)}`, 'tx');
-  await state.charWrite.writeValue(frame);
-}
-
-function queueMessage(msg) {
-  state.messageQueue.push(msg);
-}
-
-// Commandes qui NE doivent PAS être retransmises (fire-and-forget)
-// Les commandes d'info (SPEED_INFO, INCLINE_INFO, STATUS) peuvent retenter
-// Les commandes d'action (WAKE, START, STOP, SET_SPEED) ne doivent JAMAIS boucler
-function isActionCommand(cmd) {
-  if (!cmd) return false;
-  // Toute commande commençant par 02 53 (action) ou 02 44 (wake) est une action
-  return cmd[0] === 0x02 && (cmd[1] === 0x53 || cmd[1] === 0x44);
-}
-
-// Boucle de polling : envoie commandes en file, sinon ping STATUS
-async function pollTick() {
-  if (!state.connected || !state.charWrite) return;
-  try {
-    if (state.lastMessage) {
-      // On a une commande en attente de réponse
-      if (isActionCommand(state.lastMessage)) {
-        // Action : pas de retry, on abandonne après 1 seconde si pas de réponse
-        const elapsed = Date.now() - (state.lastMessageSentAt || 0);
-        if (elapsed > 1000) {
-          log(`Action sans réponse après 1s, abandon`, 'info');
-          state.lastMessage = null;
-          state.retries = MAX_RETRIES;
-        }
-        return; // NE PAS retransmettre pendant qu'on attend
-      } else {
-        // Info query : retry OK
-        await writeFrame(state.lastMessage);
-      }
-    } else if (state.messageQueue.length > 0) {
-      state.lastMessage = state.messageQueue.shift();
-      state.lastMessageSentAt = Date.now();
-      await writeFrame(state.lastMessage);
-    } else {
-      // ping status
-      state.lastMessage = CMD.STATUS;
-      state.lastMessageSentAt = Date.now();
-      await writeFrame(CMD.STATUS);
-    }
-  } catch (e) {
-    log('Erreur write : ' + e.message, 'err');
-  }
+  if (ble.device?.gatt?.connected) ble.device.gatt.disconnect();
 }
 
 function onNotification(e) {
   const bytes = dvToBytes(e.target.value);
   log(`RX : ${hex(bytes)}`, 'rx');
-
-  // Cadre attendu : [0x02, ... , 0x03]
-  if (bytes.length < 3 || bytes[0] !== 0x02 || bytes[bytes.length - 1] !== 0x03) {
-    log('Trame invalide ignorée', 'err');
-    state.retries--;
-    if (state.retries <= 0) { state.lastMessage = null; state.retries = MAX_RETRIES; }
-    return;
-  }
-
-  // Identifie la commande à laquelle répond cette trame
-  if (state.lastMessage) {
-    const cmd = state.lastMessage;
-    // Pour START on compare seulement les 3 premiers octets
-    const compareLen = cmd === CMD.START ? 3 : cmd.length;
-    let match = true;
-    for (let i = 0; i < compareLen && i < bytes.length; i++) {
-      if (cmd[i] !== bytes[i]) { match = false; break; }
-    }
-
-    if (match) {
-      handleResponse(state.lastMessage, bytes);
-      state.lastMessage = null;
-      state.retries = MAX_RETRIES;
-    } else {
-      state.retries--;
-      if (state.retries <= 0) { state.lastMessage = null; state.retries = MAX_RETRIES; }
-    }
-  }
-}
-
-function handleResponse(cmd, bytes) {
-  if (cmd === CMD.SPEED_INFO) {
-    // [0x02, 0x50, 0x02, max, min, unit, cs, 0x03]
-    if (bytes.length >= 7) {
-      state.maxSpeed = bytes[3];
-      state.minSpeed = bytes[4];
-      state.unitSpeed = bytes[5] || 10;
-      log(`Vitesse : min=${state.minSpeed} max=${state.maxSpeed} unit=${state.unitSpeed}`, 'info');
-      // Adapter le slider
-      $('speed-slider').min = state.minSpeed / 10;
-      $('speed-slider').max = state.maxSpeed / 10;
-    }
-  } else if (cmd === CMD.STATUS) {
-    // Longueur de la réponse indique l'état
-    if (bytes.length === 5 && bytes[2] === 0 && bytes[3] === 0x51) {
-      // Stopped
-      if (state.running) log('Tapis arrêté', 'info');
-      state.running = false;
-      state.speed = 0;
-      state.incline = 0;
-      $('tapis-status').textContent = 'État : arrêté';
-    } else if (bytes.length === 17) {
-      // Running - octet 3 = vitesse x10, octet 4 = incline
-      state.running = true;
-      state.speed = bytes[3] / 10;
-      state.incline = bytes[4];
-      // Tenter d'extraire temps/distance/calories depuis les octets restants
-      // Formats observés en rétro-ingénierie FitShow :
-      // [0x02, 0x51, 0x01?, speed, incline, time_hi, time_lo, dist_hi, dist_lo, cal_hi, cal_lo, ...]
-      tryParseStats(bytes);
-      $('tapis-status').textContent = `État : en marche`;
-    } else if (bytes.length > 5 && bytes.length < 17) {
-      // Starting
-      if (!state.running) log('Démarrage en cours...', 'info');
-      $('tapis-status').textContent = 'État : démarrage';
-    }
-    updateMetrics();
-  }
-}
-
-// Interprétation des octets pour la trame STATUS 17 bytes
-// Structure confirmée par capture réelle LJJ-0811FE :
-//   [00] 0x02       début
-//   [01] 0x51       opcode status
-//   [02] 0x04       (state ? sous-commande ?)
-//   [03] speed×10   vitesse en 0.1 km/h
-//   [04] incline    inclinaison
-//   [05] time       temps écoulé en secondes (byte simple, max 255s)
-//   [06] time_hi    extension temps sur longues sessions ?
-//   [07] dist       distance en hectomètres (0.01 km = 10 m), byte simple jusqu'à 2.55 km
-//   [08] dist_hi    extension distance sur longues courses ?
-//   [09] cal_hi     calories sur 16 bits BE
-//   [10] cal_lo
-//   [11..14]        réservés / autres métriques
-//   [15] checksum   XOR des octets 1 à 14
-//   [16] 0x03       fin
-function tryParseStats(bytes) {
-  if (bytes.length < 17) return;
-
-  // Temps : bytes[5] simple, bytes[6] en extension si dépassement 255s (LE)
-  const time = bytes[5] + (bytes[6] << 8);
-
-  // Distance : bytes[7..8] LE en décamètres (1 unité = 10 m)
-  // Confirmé : bytes[7]=20 → 200m = 0.2 km réels
-  const dist_dam = bytes[7] + (bytes[8] << 8);
-  const distance_km = dist_dam / 1000;
-
-  // Calories : bytes[9..10] LE, facteur ×10 sur ce modèle
-  const cal_raw = bytes[9] + (bytes[10] << 8);
-  const cal = cal_raw / 10;
-
-  state.elapsed = time;
-  state.distance = distance_km;
-  state.calories = cal;
-
-  // Détection heuristique de l'état veille profonde :
-  // - vitesse = 0, temps = 0, distance = 0, calories = 0
-  // ET l'utilisateur a essayé de démarrer sans succès depuis X secondes
-  const looksDeepSleep = (bytes[3] === 0 && time === 0 && dist_dam === 0 && cal_raw === 0);
-  if (looksDeepSleep && state.startRequestedAt) {
-    const since = Date.now() - state.startRequestedAt;
-    if (since > 5000 && !state.deepSleepWarned) {
-      log('⚠️ Le tapis semble en veille profonde. Essayez une action physique sur le tapis (tap, marcher dessus, télécommande) pour le réveiller.', 'err');
-      $('tapis-status').innerHTML = '⚠️ <b>Veille profonde détectée</b> — action physique requise sur le tapis';
-      state.deepSleepWarned = true;
-    }
-  }
-
-  // Synchronisation du curseur avec la vitesse réelle du tapis
-  syncSpeedUI(bytes[3] / 10);
-
-  // Debug : afficher la trame décortiquée
-  let debugStr = 'Octets :\n';
-  for (let i = 0; i < bytes.length; i++) {
-    const v = bytes[i];
-    debugStr += `  [${i.toString().padStart(2, '0')}] 0x${v.toString(16).padStart(2, '0')} = ${v.toString().padStart(3)}`;
-    if (i === 3) debugStr += ` ← vitesse = ${v/10} km/h`;
-    else if (i === 4) debugStr += ` ← incline = ${v}`;
-    else if (i === 5) debugStr += ` ← temps_lo (${time}s)`;
-    else if (i === 6) debugStr += ` ← temps_hi`;
-    else if (i === 7) debugStr += ` ← dist_lo (${dist_dam} dam = ${distance_km.toFixed(2)} km)`;
-    else if (i === 8) debugStr += ` ← dist_hi`;
-    else if (i === 9) debugStr += ` ← cal_lo (${cal_raw}/10 = ${cal.toFixed(1)} kcal)`;
-    else if (i === 10) debugStr += ` ← cal_hi`;
-    else if (i === bytes.length - 2) debugStr += ` ← checksum`;
-    else if (i === bytes.length - 1) debugStr += ` ← fin 0x03`;
-    debugStr += '\n';
-  }
-  const el = $('debug-frame');
-  if (el) el.textContent = debugStr;
+  ctl.handleNotification(bytes);
 }
 
 // Synchronise le curseur/slider avec la vitesse réelle du tapis
@@ -665,6 +515,8 @@ function syncSpeedUI(actualSpeed) {
   if (state.lastUserSpeedChangeAt && (now - state.lastUserSpeedChangeAt) < 3000) return;
   // Ne rien faire si la vitesse est 0 (tapis à l'arrêt, garder le setpoint en mémoire)
   if (actualSpeed === 0) return;
+  // Pendant un démarrage, la vitesse mini transitoire ne doit pas écraser la consigne
+  if (ctl.startSeq) return;
   // Synchroniser
   if (Math.abs(state.setpoint - actualSpeed) > 0.05) {
     state.setpoint = actualSpeed;
@@ -687,17 +539,9 @@ function enableControls(on) {
 }
 
 function setSpeed(s) {
-  s = Math.max(state.minSpeed / 10, Math.min(state.maxSpeed / 10, s));
-  s = Math.round(s * 10) / 10;
-  state.setpoint = s;
-  state.lastUserSpeedChangeAt = Date.now();
+  s = ctl.setSpeed(s);
   $('speed-setpoint').textContent = s.toFixed(1);
   $('speed-slider').value = s;
-  // Sur LJJ-0811FE, SET_SPEED fonctionne aussi bien à l'arrêt qu'en marche
-  if (state.connected) {
-    const cmd = [0x02, 0x53, 0x02, Math.round(s * 10), state.incline || 0];
-    queueMessage(cmd);
-  }
 }
 
 function updateMetrics() {
@@ -714,36 +558,24 @@ function updateMetrics() {
 $('btn-connect').onclick = connect;
 $('btn-disconnect').onclick = disconnect;
 
-$('btn-wake').onclick = () => {
-  log('Réveil du tapis...', 'tx');
-  queueMessage(CMD.WAKE);
-};
+$('btn-wake').onclick = () => ctl.wake();
 
 $('btn-start').onclick = () => {
-  log('Démarrage (Wake + Speed)...', 'tx');
-  state.startRequestedAt = Date.now();
   state.deepSleepWarned = false;
-  requestWakeLock(); // Garder l'écran allumé
-  // Séquence de démarrage LJJ-0811FE : Wake puis Speed
-  queueMessage(CMD.WAKE);
-  const s = Math.round(state.setpoint * 10);
-  const speedCmd = [0x02, 0x53, 0x02, s, 0];
-  queueMessage(speedCmd);
-  state.lastUserSpeedChangeAt = Date.now();
-  setTimeout(() => {
-    if (state.connected) {
-      log(`Confirmation vitesse à ${state.setpoint} km/h`, 'tx');
-      const s2 = Math.round(state.setpoint * 10);
-      queueMessage([0x02, 0x53, 0x02, s2, state.incline || 0]);
-      state.lastUserSpeedChangeAt = Date.now();
-    }
-  }, 1500);
-  state.running = true;
+  if (ctl.start()) requestWakeLock(); // Garder l'écran allumé
 };
 $('btn-stop').onclick = () => {
-  log('Envoi Stop...', 'tx');
-  queueMessage(CMD.STOP);
+  ctl.stop();
   releaseWakeLock();
+};
+
+$('strategy').value = loadStrategyPref();
+$('strategy').onchange = e => {
+  saveStrategyPref(e.target.value);
+  if (state.connected) {
+    ctl.setStrategy(e.target.value, ble.device?.name);
+    log(`Stratégie de démarrage : ${state.strategy}`, 'info');
+  }
 };
 
 $('btn-sp-up').onclick = () => setSpeed(state.setpoint + 0.5);
