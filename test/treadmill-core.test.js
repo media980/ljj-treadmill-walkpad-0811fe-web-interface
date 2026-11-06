@@ -191,7 +191,7 @@ test('fitshow: no automatic retry when the device never starts', async () => {
   assert.ok(!sent().some(isSpeed));
   assert.equal(ctl.startSeq, null);
   assert.equal(ctl.state.phase, 'stopped');
-  assert.ok(logs.some(l => /n'a pas signalé de démarrage/.test(l.msg)));
+  assert.ok(logs.some(l => /did not start/.test(l.msg)));
 });
 
 test('fitshow: missing START ack produces no error and does not block', async () => {

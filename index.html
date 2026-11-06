@@ -1,11 +1,10 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Tapis LJJ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>LJJ Treadmill</title>
 
-<!-- Favicon PNG + SVG fallback -->
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 
@@ -14,337 +13,370 @@
 <meta name="theme-color" content="#0f1419">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Tapis LJJ">
+<meta name="apple-mobile-web-app-title" content="Treadmill">
 <meta name="mobile-web-app-capable" content="yes">
 <style>
+  /* ---------- Design tokens ---------- */
   :root {
     --bg: #0f1419;
     --panel: #1a2028;
     --panel-2: #232b36;
     --border: #2d3744;
     --text: #e6e9ef;
-    --muted: #8b94a3;
+    --muted: #9aa3b2;
     --accent: #4f9eff;
     --accent-hover: #6ab0ff;
     --ok: #4ade80;
     --warn: #fbbf24;
     --err: #f87171;
+    --err-bg: #3a1f22;
+    --radius: 12px;
     --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { touch-action: manipulation; } /* no double-tap zoom, rapid taps still register */
   body {
-    margin: 0; padding: 16px;
+    margin: 0;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     background: var(--bg); color: var(--text);
     min-height: 100vh;
+    -webkit-tap-highlight-color: transparent;
   }
-  h1 { margin: 0 0 4px; font-size: 22px; }
-  .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
-  .grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
-  @media (min-width: 900px) {
-    .grid { grid-template-columns: 1fr 1fr; }
-    .full { grid-column: 1 / -1; }
-  }
-  .panel {
+  main { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+  .card {
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: 10px; padding: 14px;
+    border-radius: var(--radius); padding: 16px;
   }
-  .panel h2 {
-    margin: 0 0 10px; font-size: 13px; text-transform: uppercase;
-    letter-spacing: 0.5px; color: var(--muted);
+  .label {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.6px;
   }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ---------- Buttons (min. 48 px touch targets) ---------- */
   button {
+    min-height: 48px; padding: 0 18px;
     background: var(--accent); color: #000;
-    border: none; border-radius: 6px;
-    padding: 10px 16px; font-size: 14px; font-weight: 600;
-    cursor: pointer; transition: background 0.15s;
+    border: none; border-radius: 10px;
+    font: inherit; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: background 0.15s, opacity 0.15s;
   }
   button:hover:not(:disabled) { background: var(--accent-hover); }
-  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:disabled { opacity: 0.35; filter: grayscale(0.8); cursor: not-allowed; }
+  button:focus-visible, select:focus-visible, summary:focus-visible {
+    outline: 3px solid var(--accent); outline-offset: 2px;
+  }
   button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
-  button.danger { background: var(--err); color: #000; }
-  button.big { padding: 16px 24px; font-size: 16px; min-width: 100px; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .status {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 12px; border-radius: 20px;
-    font-size: 12px; font-weight: 600; background: var(--panel-2);
+  button.secondary:hover:not(:disabled) { background: #2c3644; }
+  button.danger { background: var(--err); }
+  button.danger:hover:not(:disabled) { background: #fb8f8f; }
+  button.small { min-height: 36px; padding: 0 12px; font-size: 13px; }
+
+  /* ---------- Header + connection light ---------- */
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  header h1 { margin: 0; font-size: 20px; }
+  .conn { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 13px; color: var(--muted); }
+  .light {
+    width: 12px; height: 12px; border-radius: 50%; flex: none;
+    background: #5b6575; border: 2px solid rgba(255,255,255,0.08);
   }
-  .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-  .status.ok .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-  .status.warn .dot { background: var(--warn); }
-  .status.err .dot { background: var(--err); }
-  .metrics {
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
-    margin: 10px 0;
+  .conn[data-state="on"] .light   { background: var(--ok);   box-shadow: 0 0 10px var(--ok); }
+  .conn[data-state="busy"] .light { background: var(--warn); animation: pulse 1s ease-in-out infinite; }
+  .conn[data-state="err"] .light  { background: var(--err);  box-shadow: 0 0 10px var(--err); }
+  .conn[data-state="on"]  { color: var(--text); }
+  .conn[data-state="err"] { color: var(--err); }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  @media (prefers-reduced-motion: reduce) { .conn[data-state="busy"] .light { animation: none; } }
+
+  /* ---------- Banners ---------- */
+  .banner {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 12px 14px; border-radius: var(--radius); font-size: 14px;
   }
-  @media (min-width: 600px) {
-    .metrics { grid-template-columns: repeat(4, 1fr); }
-  }
-  .metric {
-    background: var(--panel-2); padding: 12px; border-radius: 8px; text-align: center;
-  }
-  .metric .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-  .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; font-family: var(--mono); }
-  .metric .unit { font-size: 12px; color: var(--muted); margin-left: 3px; }
-  .speed-box {
-    background: var(--panel-2); border-radius: 10px; padding: 16px; margin-top: 10px;
-  }
-  .big-speed {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    margin-bottom: 12px;
-  }
-  .big-speed .value {
-    font-family: var(--mono); font-size: 40px; font-weight: 800;
-    flex: 1; text-align: center; color: var(--accent);
-  }
-  .speed-slider { width: 100%; height: 30px; }
-  .speed-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-  .speed-presets button { flex: 1; min-width: 55px; padding: 8px 10px; font-size: 13px; }
+  .banner.info { background: var(--accent); color: #000; font-weight: 600; }
+  .banner.info button { background: #000; color: var(--accent); }
+  .banner.info .close { background: transparent; color: #000; margin-left: auto; padding: 0 10px; }
+  .banner.fatal { background: var(--err); color: #000; font-weight: 600; }
+
+  /* ---------- Error panel (log appears only here) ---------- */
+  .alert { background: var(--err-bg); border-color: var(--err); }
+  .alert-head { display: flex; align-items: flex-start; gap: 10px; }
+  .alert-head .msg { flex: 1; line-height: 1.45; }
+  .alert-head strong { display: block; color: var(--err); margin-bottom: 2px; }
+  .alert details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 6px 0; }
   .log {
-    font-family: var(--mono); font-size: 11px;
-    background: #000; color: #0f0;
-    padding: 10px; border-radius: 6px;
+    font-family: var(--mono); font-size: 11px; line-height: 1.5;
+    background: #000; color: #cfd6e0;
+    padding: 10px; border-radius: 8px; margin-top: 6px;
     max-height: 220px; overflow: auto;
     white-space: pre-wrap; word-break: break-all;
   }
-  .log .ts { color: #888; }
-  .log .tx { color: #fbbf24; }
-  .log .rx { color: #4ade80; }
-  .log .err { color: #f87171; }
+  .log .ts { color: #777; }
+  .log .tx { color: var(--warn); }
+  .log .rx { color: var(--ok); }
+  .log .err { color: var(--err); }
   .log .info { color: #8bb; }
-  .unsupported {
-    background: var(--err); color: #000; padding: 12px; border-radius: 8px;
-    margin-bottom: 12px; font-weight: 600;
+
+  /* ---------- Live metrics ---------- */
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; }
+  .metric .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+  .metric .unit { font-size: 12px; color: var(--muted); }
+  @media (max-width: 420px) {
+    .metrics { grid-template-columns: repeat(2, 1fr); row-gap: 14px; }
   }
-  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
-  details { margin-top: 8px; }
-  summary { cursor: pointer; color: var(--muted); font-size: 12px; }
-  select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 12px; max-width: 100%; }
+
+  /* ---------- Controls ---------- */
+  .phase {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 15px; font-weight: 600; margin-bottom: 14px; min-height: 22px;
+  }
+  .phase[data-tone="ok"]   { color: var(--ok); }
+  .phase[data-tone="warn"] { color: var(--warn); }
+  .phase[data-tone="err"]  { color: var(--err); }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .actions button { min-height: 64px; font-size: 18px; }
+
+  .speed { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .stepper { display: grid; grid-template-columns: 64px 1fr 64px; align-items: center; gap: 10px; margin-top: 8px; }
+  .stepper button { min-height: 64px; font-size: 28px; padding: 0; }
+  .stepper .value { text-align: center; font-size: 44px; font-weight: 800; color: var(--accent); }
+  .stepper .value small { font-size: 16px; font-weight: 600; color: var(--muted); }
+  .presets { display: flex; gap: 6px; margin-top: 12px; }
+  .presets button { flex: 1; min-width: 0; padding: 0; }
+  .presets button[aria-pressed="true"] { background: var(--accent); color: #000; border-color: var(--accent); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.5; text-align: center; }
+  kbd {
+    font-family: var(--mono); font-size: 11px; padding: 1px 5px;
+    border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2);
+  }
+  @media (hover: none) { .kbd-hint { display: none; } }
+
+  /* ---------- Settings ---------- */
+  .settings > summary { font-size: 14px; font-weight: 600; color: var(--text); padding: 0; list-style: none; display: flex; justify-content: space-between; }
+  .settings > summary::-webkit-details-marker { display: none; }
+  .settings > summary::after { content: '▾'; color: var(--muted); transition: transform 0.15s; }
+  .settings[open] > summary::after { transform: rotate(180deg); }
+  .setting { margin-top: 16px; }
+  .setting p { margin: 6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  select {
+    width: 100%; min-height: 44px; margin-top: 6px; padding: 0 10px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px;
+  }
+  .debug-frame {
+    font-family: var(--mono); font-size: 11px; background: var(--panel-2);
+    padding: 8px; border-radius: 6px; margin-top: 6px; white-space: pre-wrap;
+  }
 </style>
 </head>
 <body>
+<main>
 
-<h1>🏃 Tapis LJJ — Contrôle</h1>
-<div class="sub">Protocole FitShow — LJJ-0811FE (LIJIUJIA), RUNimon FS-E30107 et compatibles</div>
-
-<!-- Bannière installation PWA -->
-<div id="install-banner" style="display:none;background:var(--accent);color:#000;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:14px;font-weight:600;">
-  📱 <span id="install-msg">Installez cette app sur votre appareil pour un accès rapide.</span>
-  <button id="btn-install" style="background:#000;color:var(--accent);margin-left:10px;padding:4px 12px;font-size:13px">Installer</button>
-  <button id="btn-install-close" class="secondary" style="padding:4px 10px;font-size:13px;float:right">×</button>
-</div>
-
-<div id="unsupported" class="unsupported" style="display:none">
-  ⚠️ Web Bluetooth n'est pas disponible. Utilisez Chrome, Edge ou Opera sur Android ou Desktop (page servie en HTTPS ou via localhost).
-</div>
-
-<div class="grid">
-
-  <!-- CONNEXION -->
-  <div class="panel full">
-    <div class="row" style="justify-content:space-between">
-      <div class="row">
-        <button id="btn-connect">🔗 Connecter le tapis</button>
-        <button id="btn-disconnect" class="secondary" disabled>Déconnecter</button>
+  <!-- Header: app name, connection light, single connect/disconnect action -->
+  <header>
+    <div>
+      <h1>LJJ Treadmill</h1>
+      <div id="conn" class="conn" data-state="off" role="status" aria-live="polite">
+        <span class="light" aria-hidden="true"></span>
+        <span id="conn-text">Not connected</span>
       </div>
-      <span id="status" class="status"><span class="dot"></span><span id="status-text">Non connecté</span></span>
     </div>
+    <button id="btn-connect">Connect</button>
+  </header>
+
+  <div id="unsupported" class="banner fatal" hidden>
+    Web Bluetooth is not available in this browser. Use Chrome, Edge or Opera on Android or desktop (page served over HTTPS or from localhost).
   </div>
 
-  <!-- CONTRÔLE -->
-  <div class="panel" id="panel-control">
-    <h2>Contrôle</h2>
-    <div class="row" style="justify-content:center">
-      <button id="btn-wake" class="big secondary" disabled title="Réveil par BLE (ne fonctionne PAS en veille profonde — attendre un réveil spontané du tapis)">⏰ Wake</button>
-      <button id="btn-start" class="big" disabled>▶ Start</button>
-      <button id="btn-stop" class="big danger" disabled>⏹ Stop</button>
-    </div>
-
-    <div class="speed-box">
-      <div class="big-speed">
-        <button id="btn-sp-down" class="secondary" disabled>−</button>
-        <div class="value"><span id="speed-setpoint">1.0</span> <span style="font-size:16px;color:var(--muted)">km/h</span></div>
-        <button id="btn-sp-up" class="secondary" disabled>+</button>
-      </div>
-      <input type="range" id="speed-slider" class="speed-slider" min="1" max="8" step="0.5" value="1" disabled>
-      <div class="speed-presets">
-        <button data-speed="1" class="secondary" disabled>1</button>
-        <button data-speed="2" class="secondary" disabled>2</button>
-        <button data-speed="3" class="secondary" disabled>3</button>
-        <button data-speed="4" class="secondary" disabled>4</button>
-        <button data-speed="5" class="secondary" disabled>5</button>
-        <button data-speed="6" class="secondary" disabled>6</button>
-      </div>
-    </div>
-    <div class="hint">
-      La commande de vitesse n'est envoyée que lorsque le tapis est en marche (après Start).
-    </div>
-    <div class="hint">
-      <label>Démarrage :
-        <select id="strategy">
-          <option value="auto">Auto (selon le nom Bluetooth)</option>
-          <option value="fitshow">FitShow standard — Start 53 01 (RUNimon, FS-…)</option>
-          <option value="ljj">LJJ-0811FE — Wake + vitesse</option>
-        </select>
-      </label>
-    </div>
+  <div id="install-banner" class="banner info" hidden>
+    <span id="install-msg">Install this app for quick access.</span>
+    <button id="btn-install" class="small">Install</button>
+    <button id="btn-install-close" class="small close" aria-label="Dismiss">✕</button>
   </div>
 
-  <!-- MÉTRIQUES -->
-  <div class="panel">
-    <h2>Métriques live</h2>
+  <!-- Error panel: hidden until something goes wrong -->
+  <section id="error-panel" class="card alert" role="alert" hidden>
+    <div class="alert-head">
+      <div class="msg"><strong>Something went wrong</strong><span id="error-msg"></span></div>
+      <button id="btn-dismiss" class="secondary small">Dismiss</button>
+    </div>
+    <details id="log-details">
+      <summary>Show log</summary>
+      <div id="log" class="log"></div>
+    </details>
+  </section>
+
+  <!-- Live metrics -->
+  <section class="card" aria-label="Live metrics">
     <div class="metrics">
       <div class="metric">
-        <div class="label">Vitesse</div>
-        <div class="value"><span id="m-speed">—</span><span class="unit">km/h</span></div>
+        <div class="label">Speed</div>
+        <div class="value num"><span id="m-speed">—</span></div>
+        <div class="unit">km/h</div>
       </div>
       <div class="metric">
-        <div class="label">Temps</div>
-        <div class="value" id="m-time">—</div>
+        <div class="label">Time</div>
+        <div class="value num" id="m-time">—</div>
+        <div class="unit">min:s</div>
       </div>
       <div class="metric">
         <div class="label">Distance</div>
-        <div class="value"><span id="m-dist">—</span><span class="unit">km</span></div>
+        <div class="value num"><span id="m-dist">—</span></div>
+        <div class="unit">km</div>
       </div>
       <div class="metric">
         <div class="label">Calories</div>
-        <div class="value"><span id="m-cal">—</span><span class="unit">kcal</span></div>
+        <div class="value num"><span id="m-cal">—</span></div>
+        <div class="unit">kcal</div>
       </div>
     </div>
-    <div class="hint" id="tapis-status">État : non connecté</div>
-    <details style="margin-top:8px">
-      <summary>🔍 Debug trame running (dernière reçue)</summary>
-      <div id="debug-frame" style="font-family:var(--mono);font-size:11px;background:var(--panel-2);padding:8px;border-radius:4px;margin-top:6px;white-space:pre-wrap"></div>
-    </details>
-  </div>
+  </section>
 
-  <!-- LOG -->
-  <div class="panel full">
-    <h2>Journal BLE
-      <label style="float:right;font-size:11px;font-weight:400;color:var(--muted);margin-left:8px">
-        <input type="checkbox" id="filter-poll" checked> Masquer polling
-      </label>
-      <button id="btn-clear" class="secondary" style="float:right;padding:2px 8px;font-size:11px">Clear</button>
-      <button id="btn-pause-log" class="secondary" style="float:right;padding:2px 8px;font-size:11px;margin-right:6px">⏸ Pause</button>
-      <button id="btn-toggle-log" class="secondary" style="float:right;padding:2px 8px;font-size:11px;margin-right:6px">Masquer</button>
-    </h2>
-    <div id="log" class="log">En attente de connexion...</div>
-  </div>
+  <!-- Controls -->
+  <section class="card" aria-label="Controls">
+    <div id="phase" class="phase" aria-live="polite">Connect the treadmill to begin</div>
+    <div class="actions">
+      <button id="btn-start" disabled title="Start (S)">▶ Start</button>
+      <button id="btn-stop" class="danger" disabled title="Stop (Esc)">■ Stop</button>
+    </div>
 
-</div>
+    <div class="speed">
+      <div class="label" style="text-align:center">Target speed</div>
+      <div class="stepper">
+        <button id="btn-sp-down" class="secondary" disabled aria-label="Decrease speed" title="Slower (↓)">−</button>
+        <div class="value num" aria-live="polite"><span id="speed-setpoint">1.0</span> <small>km/h</small></div>
+        <button id="btn-sp-up" class="secondary" disabled aria-label="Increase speed" title="Faster (↑)">+</button>
+      </div>
+      <div id="presets" class="presets" role="group" aria-label="Speed presets"></div>
+      <div class="hint">
+        Pick the speed before or during a walk; it is sent once the belt is moving.
+        <span class="kbd-hint"><br>Keys: <kbd>S</kbd> start · <kbd>Esc</kbd> stop · <kbd>↑</kbd><kbd>↓</kbd> speed</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Advanced settings, collapsed by default -->
+  <details class="card settings">
+    <summary>Settings</summary>
+
+    <div class="setting">
+      <label class="label" for="strategy">Start method</label>
+      <select id="strategy">
+        <option value="auto">Automatic (based on Bluetooth name)</option>
+        <option value="fitshow">FitShow standard: Start command (RUNimon, FS-…)</option>
+        <option value="ljj">LJJ-0811FE: Wake + speed</option>
+      </select>
+      <p>Leave on Automatic unless the belt does not start.</p>
+    </div>
+
+    <div class="setting">
+      <div class="label">Wake treadmill</div>
+      <button id="btn-wake" class="secondary small" style="margin-top:6px" disabled>Send wake signal</button>
+      <p>LJJ-0811FE only. Does not work in deep sleep (screen fully off); wait for the treadmill to wake up on its own.</p>
+    </div>
+
+    <div class="setting">
+      <details>
+        <summary>Last status frame (debug)</summary>
+        <div id="debug-frame" class="debug-frame">No data yet.</div>
+      </details>
+    </div>
+  </details>
+
+</main>
 
 <script src="treadmill-core.js"></script>
 <script>
 // =======================================================
-//  Protocole FitShow : voir treadmill-core.js
-//  (trames, file de commandes, stratégies de démarrage, Stop prioritaire)
+//  FitShow protocol: see treadmill-core.js
+//  (frames, command queue, start strategies, priority Stop)
 // =======================================================
 const FS_SERVICE = '0000fff0-0000-1000-8000-00805f9b34fb';
 const FS_READ    = '0000fff1-0000-1000-8000-00805f9b34fb'; // notify
 const FS_WRITE   = '0000fff2-0000-1000-8000-00805f9b34fb'; // write
 const POLL_INTERVAL_MS = 500;
+const LOG_MAX_LINES = 200;
+const SPEED_STEP = 0.5;
 
-const { TreadmillController } = window.TreadmillCore;
+const { TreadmillController, OP } = window.TreadmillCore;
 
-// Objets Web Bluetooth
 const ble = { device: null, server: null, charRead: null, charWrite: null, pollHandle: null };
+let userDisconnect = false;
 
-// =======================================================
-//  Helpers
-// =======================================================
 const $ = id => document.getElementById(id);
 
-// État du log
-let logPaused = false;
-// Trames à filtrer quand "masquer polling" est coché :
-//   TX polling : 02 51 51 03
-//   RX stopped : 02 51 00 51 03
-//   RX running : 02 51 ... (17 bytes) — on les garde en "compactant"
-const POLLING_TX_HEX = '02 51 51 03';
-const POLLING_RX_STOPPED_HEX = '02 51 00 51 03';
-let pollingCounter = { tx: 0, rxStopped: 0, rxRunning: 0 };
-let lastPollingRenderTime = 0;
+// =======================================================
+//  Log: kept in memory, shown only when an error occurs
+// =======================================================
+const POLL_TX = 'TX : 02 51 51 03'; // heartbeat, every 500 ms: never stored
+const logLines = [];
 
-const log = (msg, cls = 'info') => {
-  if (logPaused) return;
+function log(msg, cls = 'info') {
+  if (msg === POLL_TX) return;
+  const line = { ts: new Date().toLocaleTimeString(), msg, cls };
+  logLines.push(line);
+  if (logLines.length > LOG_MAX_LINES) logLines.shift();
+  if (cls === 'err') showError(msg);
+  else if (!$('error-panel').hidden) appendLogLine(line);
+}
 
-  // Filtrage polling si activé
-  if ($('filter-poll')?.checked) {
-    if (msg === `TX : ${POLLING_TX_HEX}`) {
-      pollingCounter.tx++;
-      return renderPollingSummary();
-    }
-    if (msg === `RX : ${POLLING_RX_STOPPED_HEX}`) {
-      pollingCounter.rxStopped++;
-      return renderPollingSummary();
-    }
-    // Les trames RX de 17 bytes (running) commencent par "RX : 02 51" et font 51 chars
-    if (msg.startsWith('RX : 02 51') && msg.length > 20 && msg.length < 60) {
-      pollingCounter.rxRunning++;
-      return renderPollingSummary();
-    }
-  }
-
-  writeLogLine(msg, cls);
-};
-
-function writeLogLine(msg, cls) {
+function appendLogLine({ ts, msg, cls }) {
   const el = $('log');
-  const ts = new Date().toLocaleTimeString();
-  el.innerHTML += `<span class="ts">[${ts}]</span> <span class="${cls}">${msg}</span>\n`;
+  const tsEl = document.createElement('span');
+  tsEl.className = 'ts';
+  tsEl.textContent = `[${ts}] `;
+  const msgEl = document.createElement('span');
+  msgEl.className = cls;
+  msgEl.textContent = msg + '\n';
+  el.append(tsEl, msgEl);
+  while (el.childNodes.length > LOG_MAX_LINES * 2) el.firstChild.remove();
   el.scrollTop = el.scrollHeight;
 }
 
-// Met à jour une seule ligne compteur au lieu de spammer
-function renderPollingSummary() {
-  const now = Date.now();
-  // Mettre à jour au max 2x par seconde pour limiter les reflows
-  if (now - lastPollingRenderTime < 500) return;
-  lastPollingRenderTime = now;
-  const el = $('log');
-  // Supprime l'éventuelle ligne "polling" précédente
-  const lines = el.innerHTML.split('\n');
-  const filtered = lines.filter(l => !l.includes('POLL-SUMMARY'));
-  el.innerHTML = filtered.join('\n');
-  const total = pollingCounter.tx + pollingCounter.rxStopped + pollingCounter.rxRunning;
-  if (total > 0) {
-    const parts = [];
-    if (pollingCounter.tx) parts.push(`TX×${pollingCounter.tx}`);
-    if (pollingCounter.rxStopped) parts.push(`RX-stop×${pollingCounter.rxStopped}`);
-    if (pollingCounter.rxRunning) parts.push(`RX-run×${pollingCounter.rxRunning}`);
-    writeLogLine(`<span class="poll-summary">📊 Polling : ${parts.join(', ')}</span><!-- POLL-SUMMARY -->`, 'info');
+function showError(msg) {
+  $('error-msg').textContent = msg.replace(/^⚠️\s*/, '');
+  const panel = $('error-panel');
+  if (panel.hidden) {
+    $('log').textContent = '';
+    logLines.forEach(appendLogLine);
+    panel.hidden = false;
+  } else {
+    appendLogLine(logLines[logLines.length - 1]);
   }
-  el.scrollTop = el.scrollHeight;
 }
 
-function resetPollingCounter() {
-  pollingCounter = { tx: 0, rxStopped: 0, rxRunning: 0 };
-}
-const setStatus = (txt, cls = '') => {
-  $('status-text').textContent = txt;
-  $('status').className = 'status ' + cls;
-};
-const hex = (arr) => {
-  const a = arr.length !== undefined ? arr : new Uint8Array(arr.buffer || arr);
-  return [...a].map(b => b.toString(16).padStart(2, '0')).join(' ');
-};
-const dvToBytes = dv => {
-  const out = new Uint8Array(dv.byteLength);
-  for (let i = 0; i < dv.byteLength; i++) out[i] = dv.getUint8(i);
-  return out;
-};
-
-// Stratégie de démarrage mémorisée (auto / fitshow / ljj)
-function loadStrategyPref() {
-  try { return localStorage.getItem('start-strategy') || 'auto'; } catch { return 'auto'; }
-}
-function saveStrategyPref(v) {
-  try { localStorage.setItem('start-strategy', v); } catch {}
+function hideError() {
+  $('error-panel').hidden = true;
 }
 
 // =======================================================
-//  Contrôleur (état dérivé des réponses réelles du tapis)
+//  Connection light
+// =======================================================
+// state: off | busy | on | err
+function setConn(state, text) {
+  $('conn').dataset.state = state;
+  $('conn-text').textContent = text;
+  const btn = $('btn-connect');
+  btn.disabled = state === 'busy';
+  btn.textContent = state === 'on' ? 'Disconnect' : state === 'busy' ? 'Connecting…' : 'Connect';
+  btn.className = state === 'on' ? 'secondary' : '';
+}
+
+const hex = arr => [...arr].map(b => b.toString(16).padStart(2, '0')).join(' ');
+const dvToBytes = dv => new Uint8Array(dv.buffer.slice(dv.byteOffset, dv.byteOffset + dv.byteLength));
+
+function loadPref(key, fallback) {
+  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+}
+function savePref(key, v) {
+  try { localStorage.setItem(key, v); } catch {}
+}
+
+// =======================================================
+//  Controller (state derived from the treadmill's real replies)
 // =======================================================
 const ctl = new TreadmillController({
   write: frame => ble.charWrite.writeValue(frame),
@@ -353,387 +385,369 @@ const ctl = new TreadmillController({
 });
 const state = ctl.state;
 
-const PHASE_LABELS = {
-  disconnected: 'non connecté',
-  unknown: 'connecté',
-  stopped: 'arrêté',
-  starting: 'démarrage demandé…',
-  countdown: 'démarrage imminent',
-  running: 'en marche',
-  stopping: 'arrêt en cours…',
-  paused: 'en pause',
-  safety: '⚠️ clé de sécurité retirée',
-  error: '⚠️ erreur tapis',
+const PHASES = {
+  disconnected: ['Connect the treadmill to begin', ''],
+  unknown:      ['Connected', ''],
+  stopped:      ['Stopped', ''],
+  starting:     ['Starting…', 'warn'],
+  countdown:    ['Starting soon', 'warn'],
+  running:      ['Running', 'ok'],
+  stopping:     ['Stopping…', 'warn'],
+  paused:       ['Paused', 'warn'],
+  safety:       ['Safety key removed', 'err'],
+  error:        ['Treadmill error', 'err'],
 };
+
+function renderPhase() {
+  if (state.deepSleepWarned) return;
+  let [label, tone] = PHASES[state.phase] || [state.phase, ''];
+  if (state.phase === 'countdown' && state.countdown != null) label = `Starting in ${state.countdown} s`;
+  $('phase').textContent = label;
+  $('phase').dataset.tone = tone;
+}
 
 function onControllerUpdate(kind) {
   if (kind === 'range') {
-    $('speed-slider').min = state.minSpeed / 10;
-    $('speed-slider').max = state.maxSpeed / 10;
-    $('speed-setpoint').textContent = state.setpoint.toFixed(1);
-    $('speed-slider').value = state.setpoint;
+    buildPresets();
+    renderSetpoint(state.setpoint);
     return;
   }
-  let label = PHASE_LABELS[state.phase] || state.phase;
-  if (state.phase === 'countdown' && state.countdown != null) label = `démarrage dans ${state.countdown} s`;
-  if (!state.deepSleepWarned) $('tapis-status').textContent = `État : ${label}`;
-
+  renderPhase();
   const st = state.lastStatus;
   if (st && st.full) {
     syncSpeedUI(st.speed);
     checkDeepSleep(st);
-    renderDebugFrame(state.lastStatusBytes, st);
+    if ($('debug-frame').offsetParent) renderDebugFrame(state.lastStatusBytes, st);
   }
   if (!state.running && state.phase === 'stopped') releaseWakeLock();
   updateMetrics();
+  updateControls();
 }
 
-// Détection heuristique de la veille profonde (LJJ-0811FE) :
-// trame complète tout à zéro alors qu'un démarrage a été demandé il y a > 5 s
+// Deep sleep heuristic (LJJ-0811FE): full frame all zero although a start
+// was requested more than 5 s ago
 function checkDeepSleep(st) {
   if (state.strategy !== 'ljj') return;
   const looksDeepSleep = st.speed === 0 && st.elapsed === 0 && st.distanceRaw === 0 && st.caloriesRaw === 0;
-  if (looksDeepSleep && state.startRequestedAt) {
-    const since = Date.now() - state.startRequestedAt;
-    if (since > 5000 && !state.deepSleepWarned) {
-      log('⚠️ Le tapis semble en veille profonde. Essayez une action physique sur le tapis (tap, marcher dessus, télécommande) pour le réveiller.', 'err');
-      $('tapis-status').innerHTML = '⚠️ <b>Veille profonde détectée</b> — action physique requise sur le tapis';
-      state.deepSleepWarned = true;
-    }
+  if (looksDeepSleep && state.startRequestedAt && !state.deepSleepWarned &&
+      Date.now() - state.startRequestedAt > 5000) {
+    log('The treadmill seems to be in deep sleep. Wake it physically (tap it, step on it, or use the remote).', 'err');
+    $('phase').textContent = 'Deep sleep: wake the treadmill physically';
+    $('phase').dataset.tone = 'err';
+    state.deepSleepWarned = true;
   }
 }
 
-// Debug : trame STATUS décortiquée
 function renderDebugFrame(bytes, st) {
   const el = $('debug-frame');
   if (!el || !bytes) return;
-  let debugStr = 'Octets :\n';
+  const notes = {
+    2: `status code (${state.phase})`,
+    3: `speed = ${bytes[3] / 10} km/h`,
+    4: `incline = ${bytes[4]}`,
+    5: `time_lo (${st.elapsed} s)`,
+    6: 'time_hi',
+    7: `dist_lo (${st.distanceRaw} = ${st.distance.toFixed(2)} km)`,
+    8: 'dist_hi',
+    9: `cal_lo (${st.caloriesRaw}/10 = ${st.calories.toFixed(1)} kcal)`,
+    10: 'cal_hi',
+    [bytes.length - 2]: 'checksum',
+    [bytes.length - 1]: 'end 0x03',
+  };
+  let out = '';
   for (let i = 0; i < bytes.length; i++) {
     const v = bytes[i];
-    debugStr += `  [${i.toString().padStart(2, '0')}] 0x${v.toString(16).padStart(2, '0')} = ${v.toString().padStart(3)}`;
-    if (i === 2) debugStr += ` ← code état (${state.phase})`;
-    else if (i === 3) debugStr += ` ← vitesse = ${v/10} km/h`;
-    else if (i === 4) debugStr += ` ← incline = ${v}`;
-    else if (i === 5) debugStr += ` ← temps_lo (${st.elapsed}s)`;
-    else if (i === 6) debugStr += ` ← temps_hi`;
-    else if (i === 7) debugStr += ` ← dist_lo (${st.distanceRaw} = ${st.distance.toFixed(2)} km)`;
-    else if (i === 8) debugStr += ` ← dist_hi`;
-    else if (i === 9) debugStr += ` ← cal_lo (${st.caloriesRaw}/10 = ${st.calories.toFixed(1)} kcal)`;
-    else if (i === 10) debugStr += ` ← cal_hi`;
-    else if (i === bytes.length - 2) debugStr += ` ← checksum`;
-    else if (i === bytes.length - 1) debugStr += ` ← fin 0x03`;
-    debugStr += '\n';
+    out += `[${String(i).padStart(2, '0')}] 0x${v.toString(16).padStart(2, '0')} = ${String(v).padStart(3)}`;
+    if (notes[i]) out += `  ← ${notes[i]}`;
+    out += '\n';
   }
-  el.textContent = debugStr;
+  el.textContent = out;
 }
 
 // =======================================================
-//  Connexion
+//  Connection
 // =======================================================
 async function connect() {
+  userDisconnect = false;
   try {
-    setStatus('Sélection...', 'warn');
-    log('Ouverture du sélecteur Bluetooth...');
+    setConn('busy', 'Choose your treadmill…');
+    log('Opening Bluetooth device picker...');
 
-    // On accepte tout pour gérer aussi les tapis sans préfixe FS-
+    // Accept all devices, so treadmills without an "FS-" prefix work too
     const device = await navigator.bluetooth.requestDevice({
       acceptAllDevices: true,
       optionalServices: [FS_SERVICE, 0x1826, 'device_information', 'battery_service'],
     });
-    log(`Appareil : ${device.name || '(sans nom)'} — ${device.id}`);
+    log(`Device: ${device.name || '(unnamed)'} (${device.id})`);
     ble.device = device;
     device.addEventListener('gattserverdisconnected', onDisconnected);
 
-    setStatus('Connexion...', 'warn');
+    setConn('busy', 'Connecting…');
     ble.server = await device.gatt.connect();
-    log('Serveur GATT connecté', 'rx');
+    log('GATT server connected', 'rx');
 
     const svc = await ble.server.getPrimaryService(FS_SERVICE);
-    log(`Service FitShow 0xFFF0 trouvé ✓`, 'rx');
+    log('FitShow service 0xFFF0 found', 'rx');
 
     ble.charRead = await svc.getCharacteristic(FS_READ);
     await ble.charRead.startNotifications();
     ble.charRead.addEventListener('characteristicvaluechanged', onNotification);
-    log('Notifications 0xFFF1 activées', 'info');
-
     ble.charWrite = await svc.getCharacteristic(FS_WRITE);
-    log('Canal write 0xFFF2 prêt', 'info');
+    log('Notify 0xFFF1 and write 0xFFF2 ready', 'info');
 
-    setStatus(device.name || 'Connecté', 'ok');
-    $('btn-connect').disabled = true;
-    $('btn-disconnect').disabled = false;
-    enableControls(true);
+    setConn('on', `Connected · ${device.name || 'treadmill'}`);
+    hideError();
 
-    // Initialisation : infos vitesse/incline puis boucle de polling (heartbeat)
+    // Init: speed/incline info, then the polling loop (heartbeat)
     ctl.attach(device.name, $('strategy').value);
     state.deepSleepWarned = false;
     ble.pollHandle = setInterval(() => ctl.tick(), POLL_INTERVAL_MS);
-
+    onControllerUpdate('status');
   } catch (e) {
-    if (e.name === 'NotFoundError') {
-      log('Pas de service FitShow 0xFFF0 sur cet appareil', 'err');
-      setStatus('Incompatible', 'err');
+    if (e.name === 'NotFoundError' && /cancel/i.test(e.message)) {
+      // User closed the picker: not an error
+      log('Device picker closed', 'info');
+      setConn('off', 'Not connected');
+    } else if (e.name === 'NotFoundError') {
+      setConn('err', 'Not compatible');
+      log('This device has no FitShow service (0xFFF0). Is it the right treadmill?', 'err');
     } else {
-      log('Erreur : ' + e.message, 'err');
-      setStatus('Échec', 'err');
+      setConn('err', 'Connection failed');
+      log('Connection failed: ' + e.message, 'err');
     }
+    if (ble.device?.gatt?.connected) ble.device.gatt.disconnect();
   }
 }
 
 function onDisconnected() {
-  log('Déconnecté du tapis', 'err');
-  setStatus('Déconnecté', 'err');
   if (ble.pollHandle) { clearInterval(ble.pollHandle); ble.pollHandle = null; }
   ctl.reset();
   releaseWakeLock();
-  $('btn-connect').disabled = false;
-  $('btn-disconnect').disabled = true;
-  enableControls(false);
-  $('tapis-status').textContent = 'État : non connecté';
+  if (userDisconnect) {
+    log('Disconnected', 'info');
+    setConn('off', 'Not connected');
+  } else {
+    setConn('err', 'Connection lost');
+    log('Connection to the treadmill was lost. Make sure it is switched on and in range, then connect again.', 'err');
+  }
+  onControllerUpdate('status');
 }
 
 async function disconnect() {
+  userDisconnect = true;
   if (state.connected && state.running) {
-    // Arrêter la bande avant de couper la liaison
-    try { await ctl.stop(); } catch {}
+    try { await ctl.stop(); } catch {} // stop the belt before dropping the link
   }
   if (ble.device?.gatt?.connected) ble.device.gatt.disconnect();
+  else onDisconnected();
 }
 
 function onNotification(e) {
   const bytes = dvToBytes(e.target.value);
-  log(`RX : ${hex(bytes)}`, 'rx');
+  if (bytes[1] !== OP.STATUS) log(`RX : ${hex(bytes)}`, 'rx'); // heartbeat replies are not stored
   ctl.handleNotification(bytes);
 }
 
-// Synchronise le curseur/slider avec la vitesse réelle du tapis
-// mais seulement si l'utilisateur n'a pas interagi avec les contrôles récemment
+// Follow the treadmill's real speed, except for 3 s after a user change
+// so the next poll does not overwrite what the user just picked
 function syncSpeedUI(actualSpeed) {
-  const now = Date.now();
-  // 3 secondes de "grâce" après une interaction utilisateur,
-  // pour qu'on n'écrase pas immédiatement son réglage
-  if (state.lastUserSpeedChangeAt && (now - state.lastUserSpeedChangeAt) < 3000) return;
-  // Ne rien faire si la vitesse est 0 (tapis à l'arrêt, garder le setpoint en mémoire)
-  if (actualSpeed === 0) return;
-  // Pendant un démarrage, la vitesse mini transitoire ne doit pas écraser la consigne
-  if (ctl.startSeq) return;
-  // Synchroniser
+  if (state.lastUserSpeedChangeAt && Date.now() - state.lastUserSpeedChangeAt < 3000) return;
+  if (actualSpeed === 0 || ctl.startSeq) return;
   if (Math.abs(state.setpoint - actualSpeed) > 0.05) {
     state.setpoint = actualSpeed;
-    $('speed-setpoint').textContent = actualSpeed.toFixed(1);
-    $('speed-slider').value = actualSpeed;
+    renderSetpoint(actualSpeed);
   }
 }
 
 // =======================================================
-//  Contrôles UI
+//  UI controls
 // =======================================================
-function enableControls(on) {
-  $('btn-wake').disabled = !on;
-  $('btn-start').disabled = !on;
-  $('btn-stop').disabled = !on;
-  $('btn-sp-up').disabled = !on;
-  $('btn-sp-down').disabled = !on;
-  $('speed-slider').disabled = !on;
-  document.querySelectorAll('.speed-presets button').forEach(b => b.disabled = !on);
+function updateControls() {
+  const c = state.connected;
+  const busy = ['starting', 'countdown', 'stopping', 'safety'].includes(state.phase);
+  $('btn-start').disabled = !c || state.running || busy;
+  $('btn-stop').disabled = !c;
+  $('btn-sp-up').disabled = !c || state.setpoint >= state.maxSpeed / 10;
+  $('btn-sp-down').disabled = !c || state.setpoint <= state.minSpeed / 10;
+  $('btn-wake').disabled = !c;
+  document.querySelectorAll('#presets button').forEach(b => { b.disabled = !c; });
+}
+
+let presetRange = '';
+function buildPresets() {
+  const min = Math.ceil(state.minSpeed / 10), max = Math.floor(state.maxSpeed / 10);
+  if (`${min}-${max}` === presetRange) return;
+  presetRange = `${min}-${max}`;
+  const step = max - min + 1 > 8 ? 2 : 1; // keep the row short (max ~8 choices)
+  const box = $('presets');
+  box.textContent = '';
+  for (let v = min; v <= max; v += step) {
+    const b = document.createElement('button');
+    b.className = 'secondary';
+    b.dataset.speed = v;
+    b.textContent = v;
+    b.disabled = !state.connected;
+    b.setAttribute('aria-label', `${v} km/h`);
+    b.onclick = () => setSpeed(v);
+    box.append(b);
+  }
+  renderSetpoint(state.setpoint);
+}
+
+function renderSetpoint(v) {
+  $('speed-setpoint').textContent = v.toFixed(1);
+  document.querySelectorAll('#presets button').forEach(b => {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === v));
+  });
+  if (state.connected) updateControls();
 }
 
 function setSpeed(s) {
-  s = ctl.setSpeed(s);
-  $('speed-setpoint').textContent = s.toFixed(1);
-  $('speed-slider').value = s;
+  renderSetpoint(ctl.setSpeed(s));
 }
 
+const fmtTime = sec => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+
 function updateMetrics() {
+  if (!state.connected) {
+    ['m-speed', 'm-time', 'm-dist', 'm-cal'].forEach(id => { $(id).textContent = '—'; });
+    return;
+  }
   $('m-speed').textContent = state.speed.toFixed(1);
-  const m = Math.floor(state.elapsed / 60), s = state.elapsed % 60;
-  $('m-time').textContent = `${m}:${s.toString().padStart(2, '0')}`;
+  $('m-time').textContent = fmtTime(state.elapsed || 0);
   $('m-dist').textContent = (state.distance || 0).toFixed(2);
   $('m-cal').textContent = state.calories !== undefined ? state.calories.toFixed(1) : '—';
+}
+
+function doStart() {
+  if ($('btn-start').disabled) return;
+  state.deepSleepWarned = false;
+  if (ctl.start()) requestWakeLock(); // keep the screen on
+  updateControls();
+}
+function doStop() {
+  if (!state.connected) return;
+  ctl.stop();
+  releaseWakeLock();
 }
 
 // =======================================================
 //  Event handlers
 // =======================================================
-$('btn-connect').onclick = connect;
-$('btn-disconnect').onclick = disconnect;
-
+$('btn-connect').onclick = () => (state.connected ? disconnect() : connect());
+$('btn-start').onclick = doStart;
+$('btn-stop').onclick = doStop;
 $('btn-wake').onclick = () => ctl.wake();
+$('btn-sp-up').onclick = () => setSpeed(state.setpoint + SPEED_STEP);
+$('btn-sp-down').onclick = () => setSpeed(state.setpoint - SPEED_STEP);
+$('btn-dismiss').onclick = hideError;
 
-$('btn-start').onclick = () => {
-  state.deepSleepWarned = false;
-  if (ctl.start()) requestWakeLock(); // Garder l'écran allumé
-};
-$('btn-stop').onclick = () => {
-  ctl.stop();
-  releaseWakeLock();
-};
-
-$('strategy').value = loadStrategyPref();
+$('strategy').value = loadPref('start-strategy', 'auto');
 $('strategy').onchange = e => {
-  saveStrategyPref(e.target.value);
+  savePref('start-strategy', e.target.value);
   if (state.connected) {
     ctl.setStrategy(e.target.value, ble.device?.name);
-    log(`Stratégie de démarrage : ${state.strategy}`, 'info');
+    log(`Start method: ${state.strategy}`, 'info');
   }
 };
 
-$('btn-sp-up').onclick = () => setSpeed(state.setpoint + 0.5);
-$('btn-sp-down').onclick = () => setSpeed(state.setpoint - 0.5);
-$('speed-slider').oninput = e => {
-  state.setpoint = parseFloat(e.target.value);
-  state.lastUserSpeedChangeAt = Date.now();
-  $('speed-setpoint').textContent = state.setpoint.toFixed(1);
-};
-$('speed-slider').onchange = e => setSpeed(parseFloat(e.target.value));
-
-document.querySelectorAll('.speed-presets button').forEach(b => {
-  b.onclick = () => setSpeed(parseInt(b.dataset.speed));
+// Keyboard shortcuts (desktop): S = start, Esc = stop, ↑/↓ = speed
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('select, input, textarea')) return;
+  if (e.key === 'Escape') { doStop(); }
+  else if (e.key === 's' || e.key === 'S') { doStart(); }
+  else if (state.connected && e.key === 'ArrowUp') { e.preventDefault(); setSpeed(state.setpoint + SPEED_STEP); }
+  else if (state.connected && e.key === 'ArrowDown') { e.preventDefault(); setSpeed(state.setpoint - SPEED_STEP); }
 });
-
-$('btn-clear').onclick = () => {
-  $('log').innerHTML = '';
-  resetPollingCounter();
-};
-$('btn-pause-log').onclick = () => {
-  logPaused = !logPaused;
-  $('btn-pause-log').textContent = logPaused ? '▶ Reprendre' : '⏸ Pause';
-  $('btn-pause-log').style.background = logPaused ? 'var(--warn)' : '';
-  $('btn-pause-log').style.color = logPaused ? '#000' : '';
-};
-$('filter-poll').onchange = () => {
-  resetPollingCounter();
-  // Nettoyer les résumés polling actuels
-  const el = $('log');
-  const lines = el.innerHTML.split('\n');
-  el.innerHTML = lines.filter(l => !l.includes('POLL-SUMMARY')).join('\n');
-};
-$('btn-toggle-log').onclick = () => {
-  const el = $('log');
-  el.style.display = el.style.display === 'none' ? '' : 'none';
-  $('btn-toggle-log').textContent = el.style.display === 'none' ? 'Afficher' : 'Masquer';
-};
 
 // =======================================================
 //  Init
 // =======================================================
+buildPresets();
 if (!navigator.bluetooth) {
-  $('unsupported').style.display = '';
-  document.querySelectorAll('button').forEach(b => b.disabled = true);
-  log('navigator.bluetooth non disponible', 'err');
+  $('unsupported').hidden = false;
+  $('btn-connect').disabled = true;
 } else {
-  log('Prêt. Cliquez "Connecter le tapis".', 'info');
+  log('Ready. Click "Connect".', 'info');
 }
 
-// =======================================================
-//  Titre d'onglet dynamique (temps de course + vitesse)
-// =======================================================
-const BASE_TITLE = 'Tapis LJJ';
-function updateTabTitle() {
+// Tab title: elapsed time + speed, visible in the taskbar
+const BASE_TITLE = 'LJJ Treadmill';
+setInterval(() => {
   if (state.connected && state.elapsed > 0) {
-    const m = Math.floor(state.elapsed / 60);
-    const s = state.elapsed % 60;
-    const timeStr = `${m}:${s.toString().padStart(2, '0')}`;
     const speedStr = state.speed > 0 ? ` · ${state.speed.toFixed(1)} km/h` : '';
-    document.title = `▶ ${timeStr}${speedStr} — ${BASE_TITLE}`;
-  } else if (state.connected) {
-    document.title = `● ${BASE_TITLE}`;
+    document.title = `▶ ${fmtTime(state.elapsed)}${speedStr} | ${BASE_TITLE}`;
   } else {
-    document.title = BASE_TITLE;
+    document.title = state.connected ? `● ${BASE_TITLE}` : BASE_TITLE;
   }
-}
-// Mettre à jour le titre chaque seconde
-setInterval(updateTabTitle, 1000);
+}, 1000);
 
 // =======================================================
-//  Installation PWA (Android/Desktop Chrome)
+//  PWA install
 // =======================================================
 let deferredInstallPrompt = null;
 
-// Enregistrer le service worker (nécessaire pour le prompt d'installation)
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js')
-      .then(reg => log(`Service worker actif (PWA installable)`, 'info'))
-      .catch(err => log(`Service worker indisponible : ${err.message}`, 'err'));
+      .then(() => log('Service worker active (app installable)', 'info'))
+      .catch(err => log(`Service worker unavailable: ${err.message}`, 'info'));
   });
 }
 
-window.addEventListener('beforeinstallprompt', (e) => {
+const installDismissed = () => loadPref('install-dismissed', '') === '1';
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+
+window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
   deferredInstallPrompt = e;
-  // Afficher la bannière si pas déjà installée ni refusée
-  if (localStorage.getItem('install-dismissed') !== '1' &&
-      !window.matchMedia('(display-mode: standalone)').matches) {
-    $('install-banner').style.display = '';
-  }
+  if (!installDismissed() && !isStandalone) $('install-banner').hidden = false;
 });
 
 $('btn-install').onclick = async () => {
   if (!deferredInstallPrompt) {
-    // iOS ou autre : pas d'API, on affiche des instructions
-    alert('Pour installer :\n\niOS (Safari) : bouton Partager → "Sur l\'écran d\'accueil"\n\nAutres : ouvrez le menu du navigateur et cherchez "Installer l\'application" ou "Ajouter à l\'écran d\'accueil".');
+    alert('To install:\n\niOS (Safari): Share button → "Add to Home Screen"\n\nOther browsers: open the browser menu and look for "Install app" or "Add to Home Screen".');
     return;
   }
   deferredInstallPrompt.prompt();
   const choice = await deferredInstallPrompt.userChoice;
-  if (choice.outcome === 'accepted') {
-    log('Application installée ✓', 'rx');
-  }
+  if (choice.outcome === 'accepted') log('App installed', 'rx');
   deferredInstallPrompt = null;
-  $('install-banner').style.display = 'none';
+  $('install-banner').hidden = true;
 };
 
 $('btn-install-close').onclick = () => {
-  $('install-banner').style.display = 'none';
-  localStorage.setItem('install-dismissed', '1');
+  $('install-banner').hidden = true;
+  savePref('install-dismissed', '1');
 };
 
-// Détection iOS (pas d'API beforeinstallprompt) : afficher la bannière quand même
+// iOS has no beforeinstallprompt: show instructions instead
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-if (isIOS && !isStandalone && localStorage.getItem('install-dismissed') !== '1') {
-  $('install-msg').textContent = 'Pour installer : bouton Partager → "Sur l\'écran d\'accueil"';
-  $('btn-install').style.display = 'none';
-  $('install-banner').style.display = '';
+if (isIOS && !isStandalone && !installDismissed()) {
+  $('install-msg').textContent = 'To install: Share button → "Add to Home Screen"';
+  $('btn-install').hidden = true;
+  $('install-banner').hidden = false;
 }
 
 // =======================================================
-//  Protection contre fermeture accidentelle
+//  Safety: confirm before closing while the belt is moving
 // =======================================================
-window.addEventListener('beforeunload', (e) => {
-  // Ne montrer l'alerte que si une session est en cours (tapis en marche)
+window.addEventListener('beforeunload', e => {
   if (state.connected && state.speed > 0) {
     e.preventDefault();
-    e.returnValue = 'Le tapis est en marche. Fermer la page va interrompre la session.';
+    e.returnValue = 'The treadmill is running. Closing the page will interrupt the session.';
     return e.returnValue;
   }
 });
 
-// Sur mobile, empêcher le scroll/pinch qui peut fermer la page par erreur
-document.addEventListener('touchmove', (e) => {
-  if (e.scale !== 1) e.preventDefault();
-}, { passive: false });
-
-// Empêcher le double-tap zoom qui peut déclencher des actions non voulues
-let lastTouchEnd = 0;
-document.addEventListener('touchend', (e) => {
-  const now = Date.now();
-  if (now - lastTouchEnd < 300) e.preventDefault();
-  lastTouchEnd = now;
-}, false);
-
-// Wake lock : empêcher l'écran de s'éteindre pendant une session
+// Wake lock: keep the screen on during a session
 let wakeLockSentinel = null;
 async function requestWakeLock() {
-  if ('wakeLock' in navigator) {
-    try {
-      wakeLockSentinel = await navigator.wakeLock.request('screen');
-      log('🔒 Écran maintenu allumé pendant la session', 'info');
-    } catch (e) {
-      // Silencieux, feature optionnelle
-    }
-  }
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+    log('Screen kept on during the session', 'info');
+  } catch { /* optional feature */ }
 }
 function releaseWakeLock() {
   if (wakeLockSentinel) {
@@ -741,7 +755,6 @@ function releaseWakeLock() {
     wakeLockSentinel = null;
   }
 }
-// Réacquisition du wake lock au retour sur l'onglet
 document.addEventListener('visibilitychange', () => {
   if (wakeLockSentinel !== null && document.visibilityState === 'visible' && state.speed > 0) {
     requestWakeLock();

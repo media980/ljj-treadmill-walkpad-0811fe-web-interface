@@ -19,7 +19,7 @@ Works on Windows, Android, macOS, Linux and ChromeOS. **Does not work on iOS** (
   - [Installing as an app (PWA)](#installing-as-an-app-pwa)
   - [Using the activity badge](#using-the-activity-badge)
   - [Wake button and deep sleep](#wake-button-and-deep-sleep)
-  - [BLE log and debugging](#ble-log-and-debugging)
+  - [Error panel, log and debugging](#error-panel-log-and-debugging)
 - [Project Structure](#-project-structure)
 - [Reverse-Engineered Protocol](#-reverse-engineered-protocol)
 - [Limitations](#-limitations)
@@ -36,7 +36,7 @@ Works on Windows, Android, macOS, Linux and ChromeOS. **Does not work on iOS** (
 - 🔗 **Direct Bluetooth connection** from the browser using the Web Bluetooth API — no pairing through OS settings needed
 - ▶️ **Full control**: start, stop, speed adjustment, wake
 - 📊 **Live metrics**: speed, elapsed time, distance, calories — all synced with the treadmill's display
-- 🔄 **Two-way UI sync**: the speed slider follows the treadmill's actual speed, not just your last command
+- 🔄 **Two-way UI sync**: the target speed follows the treadmill's actual speed, not just your last command
 - 📱 **Installable as a PWA** on desktop and Android — icon on home screen, runs in standalone window
 - ⏱️ **Elapsed time in the tab title** — visible at a glance in the taskbar
 - 🔢 **Numeric badge on the app icon** showing minutes elapsed (Windows taskbar, Android home screen)
@@ -93,43 +93,54 @@ However, PWA installation and the taskbar badge feature **will not work** becaus
 
 1. Turn on the treadmill and make sure the screen is active (not in deep sleep — see [limitations](#-limitations))
 2. Open the web app in Chrome/Edge
-3. Click **🔗 Connecter le tapis** (Connect the treadmill)
+3. Click **Connect** (top right)
 4. In the Bluetooth device picker, select the treadmill (its name usually starts with `LJJ-`, `FS-` or similar)
-5. Wait for the status indicator to turn green with the treadmill's name
+5. Wait for the status light next to the title to turn green ("Connected · <name>")
 
-Once connected, the app starts polling the treadmill every 500 ms to read its status. You should see a steady exchange of TX/RX frames in the BLE log panel.
+The status light shows the Bluetooth connection at a glance:
+
+| Light | Meaning |
+|---|---|
+| ⚪ grey | Not connected |
+| 🟡 amber, pulsing | Connecting |
+| 🟢 green | Connected |
+| 🔴 red | Connection failed or lost |
+
+Once connected, the app polls the treadmill every 500 ms to read its status. The same **Connect** button turns into **Disconnect**.
 
 ### Starting and stopping
 
-- **▶ Start**: starts the treadmill and then applies the speed shown in the slider. The command sequence depends on the **startup strategy** (selector under the speed controls):
+- **▶ Start**: starts the treadmill and then applies the target speed. The command sequence depends on the **start method** (under **Settings**):
   - **Auto** (default): `LJJ-…` names use the LJJ strategy, everything else uses FitShow standard.
   - **FitShow standard** (RUNimon `FS-E30107` and most `FS-…` devices): sends the dedicated Start/Resume command `53 01`, waits until the treadmill reports *running* (after its 3-2-1 countdown), then sends the target speed. If the treadmill does not report a start within 10 s, the app gives up — it **never retries a start automatically**.
   - **LJJ-0811FE**: sends Wake (`44 01`) followed by Set Speed (`53 02`), with one speed confirmation 1.5 s later.
-- **⏹ Stop**: has priority over everything — it cancels a start in progress, discards queued speed changes and is written immediately (no waiting for the next poll). If the treadmill still reports *running* 2 s later, Stop is re-sent (3 attempts maximum).
+- **■ Stop**: has priority over everything — it cancels a start in progress, discards queued speed changes and is written immediately (no waiting for the next poll). If the treadmill still reports *running* 2 s later, Stop is re-sent (3 attempts maximum).
 
 The running state shown in the app always comes from the treadmill's own status frames, not from the buttons pressed. After a stop, you can click Start again without any additional setup. The previously selected speed is remembered. Changing the speed while the belt is stopped only updates the setpoint; it never starts the belt.
 
 ### Controlling speed
 
-Four ways to change speed, all of them work both when the treadmill is running and when it is idle:
+Two ways to change speed, both work when the treadmill is running and when it is idle:
 
-- **Slider**: drag to any value between min and max speed. Release to commit.
-- **± buttons**: increment/decrement by 0.5 km/h.
-- **Preset buttons**: quick jump to 1, 2, 3, 4, 5 or 6 km/h.
-- **Big number display**: read-only, shows the current setpoint.
+- **− / + buttons**: decrease/increase by 0.5 km/h.
+- **Preset buttons**: jump to a whole km/h value. The presets are generated from the treadmill's speed range (e.g. 1 to 6 for the LJJ-0811FE); the active one is highlighted.
+
+The big blue number is the target speed; **Speed** in the metrics row is the belt's actual speed.
+
+**Keyboard shortcuts** (desktop): <kbd>S</kbd> start · <kbd>Esc</kbd> stop · <kbd>↑</kbd>/<kbd>↓</kbd> speed.
 
 The speed range is **auto-detected** from the treadmill at connection time (SPEED_INFO query). For the LJJ-0811FE this is 1.0 to 6.0 km/h.
 
-**Two-way sync behavior**: the slider reflects the treadmill's actual speed, except during a 3-second grace period after you change it manually — to avoid having your adjustment overwritten by the next polling response.
+**Two-way sync behavior**: the target speed display follows the treadmill's actual speed, except during a 3-second grace period after you change it manually — to avoid having your adjustment overwritten by the next polling response.
 
 ### Reading live metrics
 
 Four metrics are displayed and updated once per second:
 
-- **Vitesse** — current belt speed in km/h (from treadmill)
-- **Temps** — elapsed time in mm:ss (from treadmill)
-- **Distance** — total distance in km (from treadmill)
-- **Calories** — estimated calories burned (from treadmill)
+- **Speed**: current belt speed in km/h (from treadmill)
+- **Time**: elapsed time in mm:ss (from treadmill)
+- **Distance**: total distance in km (from treadmill)
+- **Calories**: estimated calories burned (from treadmill)
 
 Values come straight from the treadmill's counters, so they match exactly what you see on the physical display. Time and distance reset to zero when you Stop — this is the treadmill's behavior, not the app's.
 
@@ -144,7 +155,7 @@ The app can be installed as a standalone application. Benefits:
 
 To install:
 
-- **Chrome / Edge desktop**: click the install icon in the address bar, or use the blue "Installer" banner in the app
+- **Chrome / Edge desktop**: click the install icon in the address bar, or use the blue "Install" banner in the app
 - **Android Chrome**: tap the install prompt, or use the three-dot menu → "Install app"
 - **iOS Safari** (limited — no Bluetooth available, just for UI preview): Share button → "Add to Home Screen"
 
@@ -168,29 +179,24 @@ Platform notes:
 
 ### Wake button and deep sleep
 
-The **⏰ Wake** button sends a wake command (`02 44 01`) to the treadmill. This command is specific to the LJJ-0811FE; standard FitShow treadmills such as the RUNimon do not need it. Useful if:
+The **Send wake signal** button (under **Settings**) sends a wake command (`02 44 01`) to the treadmill. This command is specific to the LJJ-0811FE; standard FitShow treadmills such as the RUNimon do not need it. Useful if:
 
 - The treadmill shows no response to Start but the Bluetooth connection is still alive
 - The treadmill was idle for a while and seems locked
 
 Limitation: once the treadmill enters **deep sleep** (screen completely off, no response to any command), even this button cannot wake it up. The official FitShow app has the same limitation — this appears to be a hardware-level sleep mode that can only be broken by the treadmill's internal timer.
 
-### BLE log and debugging
+### Error panel, log and debugging
 
-The bottom panel shows all Bluetooth frames exchanged with the treadmill in real time:
+The Bluetooth log stays **hidden during normal use**. It appears automatically, together with a plain-language message, as soon as something goes wrong (connection failed or lost, safety key removed, treadmill did not start, …). Click **Show log** to see the recent frames:
 
 - **TX** (yellow): commands sent to the treadmill
-- **RX** (green): responses or notifications from the treadmill
+- **RX** (green): responses from the treadmill
 - **Info / Err**: app-level events
 
-Controls:
+The 500 ms status heartbeat is never stored, so the log only contains meaningful events. **Dismiss** hides the panel until the next error. A disconnect you trigger yourself is not treated as an error.
 
-- **Masquer polling** checkbox (enabled by default): hides the repetitive status heartbeat to keep the log readable, showing only a compact counter instead
-- **⏸ Pause**: freezes the log so you can read it without it scrolling
-- **Clear**: wipes the log and resets counters
-- **Masquer / Afficher**: collapses the log panel
-
-A **🔍 Debug trame running** panel under the metrics shows the last status frame broken down byte by byte with interpretations — useful for understanding the protocol or debugging a model variation.
+Under **Settings → Last status frame (debug)** you can see the last status frame broken down byte by byte, useful for understanding the protocol or debugging a model variation.
 
 ---
 
@@ -318,10 +324,10 @@ The firmware expects a **heartbeat** every 500 ms (`02 51`). Without this pollin
 Everything is in `index.html`, so grepping for the relevant keyword will take you there.
 
 - **Colors**: CSS variables at the top of the `<style>` block (`--accent`, `--bg`, `--ok`, etc.)
-- **Speed presets**: search for `speed-presets` in the HTML to change the preset buttons
-- **Title emoji**: search for `${timeStr} 🏃` in the JS to swap the emoji (🏋️ 💪 ⏱️ 🔥 all work)
+- **Speed presets**: generated by `buildPresets()` from the treadmill's speed range
+- **Title emoji**: search for `BASE_TITLE` in the JS
 - **Polling interval**: `POLL_INTERVAL_MS` constant (default: 500 ms, don't go below 200)
-- **Grace period for UI sync**: the 3-second window in `syncSpeedUI()` during which the slider won't be overwritten by polling responses
+- **Grace period for UI sync**: the 3-second window in `syncSpeedUI()` during which the target speed won't be overwritten by polling responses
 - **Default speed range**: the app queries the treadmill at connect time, but you can override `state.minSpeed` / `state.maxSpeed` defaults
 
 ---
@@ -331,8 +337,8 @@ Everything is in `index.html`, so grepping for the relevant keyword will take yo
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Treadmill doesn't appear in the Bluetooth picker | Already paired with another device | Close FitShow on other devices, remove from OS Bluetooth settings |
-| "Pas de service FitShow 0xFFF0" error | Wrong device selected or treadmill in deep sleep | Select the right device / verify screen is on |
-| Start sent but treadmill doesn't move | Wrong startup strategy, safety key, or deep sleep | Check the "Démarrage" selector (FitShow standard for `FS-…`, LJJ for `LJJ-…`), insert the safety key, then wait for spontaneous wake if the screen is off |
+| "This device has no FitShow service (0xFFF0)" error | Wrong device selected or treadmill in deep sleep | Select the right device / verify screen is on |
+| Start sent but treadmill doesn't move | Wrong startup strategy, safety key, or deep sleep | Check **Settings → Start method** (FitShow standard for `FS-…`, LJJ for `LJJ-…`), insert the safety key, then wait for spontaneous wake if the screen is off |
 | Commands work but speed is stuck at minimum | The treadmill ignored the setpoint briefly | Wait for the 1.5s auto-reconfirm, or click Start again |
 | Install banner never appears | Service worker not registered, or already installed, or non-HTTPS | Open F12 → Application → Manifest and check for errors |
 | PWA installed but no badge on Windows taskbar | App opened in browser tab, not standalone | Close the browser tab and launch via the installed app icon instead |

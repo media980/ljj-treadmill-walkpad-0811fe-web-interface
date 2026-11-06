@@ -1,5 +1,5 @@
-// Test de fumée UI : index.html dans Chromium avec un faux navigator.bluetooth
-// simulant un tapis FitShow (RUNimon FS-E30107).
+// UI smoke test: index.html in Chromium with a fake navigator.bluetooth
+// simulating a FitShow treadmill (RUNimon FS-E30107).
 // Nécessite Playwright : npm i -D playwright (ou installé globalement),
 // puis : npm run test:ui
 'use strict';
@@ -53,7 +53,7 @@ function installFakeBluetooth() {
   const charWrite = { writeValue: async f => onWrite(f) };
   const device = {
     name: 'FS-E30107', id: 'fake',
-    addEventListener: () => {},
+    addEventListener: (ev, cb) => { if (ev === 'gattserverdisconnected') window.__dropConnection = cb; },
     gatt: {
       connected: true,
       connect: async () => ({ getPrimaryService: async () => ({ getCharacteristic: async u => (u.startsWith('0000fff1') ? charRead : charWrite) }) }),
@@ -80,40 +80,62 @@ async function main() {
   await page.addInitScript(installFakeBluetooth);
   await page.goto(url);
 
-  const statusText = () => page.textContent('#tapis-status');
+  const statusText = () => page.textContent('#phase');
   const startCount = () => page.evaluate(() => window.__tx.filter(h => h.startsWith('02 53 01')).length);
+  const waitPhase = (re, timeout = 10000) =>
+    page.waitForFunction(src => new RegExp(src, 'i').test(document.querySelector('#phase').textContent), re.source, { timeout });
+  const light = () => page.getAttribute('#conn', 'data-state');
+  const errorPanelHidden = () => page.$eval('#error-panel', el => el.hidden);
+
+  // Before connecting: light off, no log visible
+  assert.equal(await light(), 'off');
+  assert.equal(await errorPanelHidden(), true);
 
   await page.click('#btn-connect');
   await page.waitForFunction(() => !document.querySelector('#btn-start').disabled);
-  await page.waitForFunction(() => /arrêté/.test(document.querySelector('#tapis-status').textContent));
+  await waitPhase(/stopped/);
+  assert.equal(await light(), 'on');
+  assert.match(await page.textContent('#conn-text'), /Connected/);
+  assert.equal(await page.textContent('#btn-connect'), 'Disconnect');
 
-  // Start au minimum (1.0 km/h)
+  // Start at minimum speed (1.0 km/h)
   await page.click('[data-speed="1"]');
   await page.click('#btn-start');
-  await page.waitForFunction(() => /en marche/.test(document.querySelector('#tapis-status').textContent), null, { timeout: 10000 });
+  await waitPhase(/running/);
   assert.equal(await startCount(), 1);
   assert.equal(await page.textContent('#m-speed'), '1.0');
+  assert.equal(await page.$eval('#btn-start', b => b.disabled), true, 'Start disabled while running');
 
   // Stop
   await page.click('#btn-stop');
-  await page.waitForFunction(() => /arrêté/.test(document.querySelector('#tapis-status').textContent), null, { timeout: 10000 });
+  await waitPhase(/stopped/);
   assert.equal(await page.evaluate(() => window.__dev.speed), 0);
 
-  // Aucun redémarrage spontané
+  // No spontaneous restart
   await page.waitForTimeout(3000);
   assert.equal(await page.evaluate(() => window.__dev.code), 0);
-  assert.match(await statusText(), /arrêté/);
+  assert.match(await statusText(), /stopped/i);
   assert.equal(await startCount(), 1);
 
-  // Restart
+  // Restart, stop via keyboard shortcut (Esc)
   await page.click('#btn-start');
-  await page.waitForFunction(() => /en marche/.test(document.querySelector('#tapis-status').textContent), null, { timeout: 10000 });
+  await waitPhase(/running/);
   assert.equal(await startCount(), 2);
-  await page.click('#btn-stop');
-  await page.waitForFunction(() => /arrêté/.test(document.querySelector('#tapis-status').textContent), null, { timeout: 10000 });
+  await page.keyboard.press('Escape');
+  await waitPhase(/stopped/);
 
+  // A normal session never shows the log
   const errLines = await page.$$eval('#log .err', els => els.map(e => e.textContent));
   assert.deepEqual(errLines, [], 'no error lines in BLE log');
+  assert.equal(await errorPanelHidden(), true, 'log stays hidden without errors');
+
+  // Unexpected connection loss: red light + error panel with log
+  await page.evaluate(() => window.__dropConnection());
+  assert.equal(await light(), 'err');
+  assert.equal(await errorPanelHidden(), false);
+  assert.match(await page.textContent('#error-msg'), /lost/);
+  assert.equal(await page.$eval('#btn-start', b => b.disabled), true);
+
   assert.deepEqual(pageErrors, []);
   console.log('UI smoke test OK —', await statusText());
   await browser.close();

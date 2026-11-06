@@ -1,7 +1,7 @@
 // Service worker minimal : nécessaire pour déclencher le prompt d'installation PWA.
 // Met en cache le strict minimum pour fonctionner hors-ligne.
 
-const CACHE_NAME = 'tapis-ljj-v2';
+const CACHE_NAME = 'tapis-ljj-v3';
 const ASSETS = [
   './',
   './index.html',

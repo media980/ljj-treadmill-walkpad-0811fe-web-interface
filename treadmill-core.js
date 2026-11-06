@@ -189,7 +189,7 @@
       this.state.connected = true;
       this.state.strategy = strategy && strategy !== 'auto' ? strategy : strategyForDevice(deviceName);
       this.state.phase = 'unknown';
-      this.log(`Stratégie de démarrage : ${this.state.strategy === 'ljj' ? 'LJJ (Wake + vitesse)' : 'FitShow (Start 53 01 puis vitesse)'}`, 'info');
+      this.log(`Start method: ${this.state.strategy === 'ljj' ? 'LJJ (Wake + speed)' : 'FitShow (Start 53 01, then speed)'}`, 'info');
       this.enqueue(CMD.SPEED_INFO, 'info');
       this.enqueue(CMD.INCLINE_INFO, 'info');
     }
@@ -223,7 +223,7 @@
       // Les opérations GATT doivent être sérialisées
       const p = this.chain.then(() => this.write(frame));
       this.chain = p.catch(() => {}).then(() => { this.inFlight--; });
-      return p.catch(e => this.log('Erreur write : ' + e.message, 'err'));
+      return p.catch(e => this.log('Write failed: ' + e.message, 'err'));
     }
 
     // Appelé toutes les 500 ms : envoie la commande suivante ou un heartbeat
@@ -236,7 +236,7 @@
         if (entry.kind === 'info' && entry.attempts < this.cfg.infoRetries) {
           this.queue.push(entry); // nouvel essai plus tard, sans bloquer le reste
         } else if (entry.kind === 'info') {
-          this.log(`Pas de réponse à ${hex(entry.bytes)} (info ignorée)`, 'info');
+          this.log(`No reply to ${hex(entry.bytes)} (info request skipped)`, 'info');
         }
         // Actions : jamais retransmises. L'état réel est lu via le polling,
         // l'absence d'accusé n'est donc pas une erreur.
@@ -256,7 +256,7 @@
     // ---------- Réception ----------
     handleNotification(bytes) {
       if (!isValidFrame(bytes)) {
-        this.log(`Trame invalide ignorée : ${hex(bytes)}`, 'err');
+        this.log(`Invalid frame ignored: ${hex(bytes)}`, 'err');
         return;
       }
       if (this.pending && responseMatches(this.pending.entry.bytes, bytes)) {
@@ -276,7 +276,7 @@
           this.state.minSpeed = min;
           this.state.unitSpeed = bytes[5] || 10;
           if (this.state.setpoint < min / 10) this.state.setpoint = min / 10;
-          this.log(`Vitesse : min=${min} max=${max} unit=${this.state.unitSpeed}`, 'info');
+          this.log(`Speed range: min=${min} max=${max} unit=${this.state.unitSpeed}`, 'info');
           this.onUpdate('range');
         }
       }
@@ -288,12 +288,12 @@
         // Le tapis renvoie sa vitesse RÉELLE (pas la consigne)
         const actual = bytes[3] / 10;
         if (!this.state.running && actual === 0) {
-          this.log('Vitesse réelle 0 : le tapis n\'est pas en marche (consigne mémorisée)', 'info');
+          this.log('Actual speed 0: belt is not moving (target speed saved)', 'info');
         }
       } else if (sub === CTRL.START) {
-        this.log('Start accepté par le tapis', 'rx');
+        this.log('Start accepted by the treadmill', 'rx');
       } else if (sub === CTRL.STOP) {
-        this.log('Stop accepté par le tapis', 'rx');
+        this.log('Stop accepted by the treadmill', 'rx');
       }
     }
 
@@ -318,11 +318,11 @@
       s.phase = this._phaseFor(st);
 
       if (st.code !== prevCode || st.moving !== wasRunning) {
-        if (st.code === STATUS.START) this.log(`Compte à rebours de démarrage${st.countdown != null ? ` : ${st.countdown}` : ''}`, 'info');
-        else if (st.moving && !wasRunning) this.log('Tapis en marche', 'rx');
-        else if (!st.moving && wasRunning) this.log('Tapis arrêté', 'info');
-        else if (st.code === STATUS.SAFETY) this.log('⚠️ Clé de sécurité retirée', 'err');
-        else if (st.code === STATUS.ERROR) this.log(`⚠️ Erreur tapis (code ${bytes[3]})`, 'err');
+        if (st.code === STATUS.START) this.log(`Start countdown${st.countdown != null ? `: ${st.countdown}` : ''}`, 'info');
+        else if (st.moving && !wasRunning) this.log('Belt running', 'rx');
+        else if (!st.moving && wasRunning) this.log('Belt stopped', 'info');
+        else if (st.code === STATUS.SAFETY) this.log('Safety key removed. Insert it to use the treadmill.', 'err');
+        else if (st.code === STATUS.ERROR) this.log(`The treadmill reports an error (code ${bytes[3]}).`, 'err');
       }
 
       // Séquence de démarrage FitShow : on attend RUNNING avant la vitesse
@@ -356,15 +356,15 @@
       const s = this.state;
       if (!s.connected) return false;
       if (s.phase === 'stopping') {
-        this.log('Arrêt en cours : attendez l\'arrêt complet avant de redémarrer', 'err');
+        this.log('The belt is still stopping. Wait until it has fully stopped, then start again.', 'err');
         return false;
       }
       if (s.phase === 'safety') {
-        this.log('Clé de sécurité retirée : démarrage impossible', 'err');
+        this.log('Cannot start: the safety key is removed.', 'err');
         return false;
       }
       if (this.startSeq || s.phase === 'countdown') {
-        this.log('Démarrage déjà en cours', 'info');
+        this.log('Already starting', 'info');
         return false;
       }
       if (s.running) {
@@ -382,22 +382,22 @@
       s.phase = 'starting';
 
       if (seq.strategy === 'ljj') {
-        this.log('Démarrage LJJ (Wake + Speed)...', 'tx');
+        this.log('Starting (LJJ: Wake + speed)...', 'tx');
         this.enqueue(CMD.WAKE, 'action');
         this.enqueue(setSpeedCmd(target, 0), 'action');
         seq.speedSent = true;
         seq.timers.push(this.setTimeout(() => {
           if (this.startSeq !== seq) return;
-          this.log(`Confirmation vitesse à ${(seq.target / 10).toFixed(1)} km/h`, 'tx');
+          this.log(`Confirming speed: ${(seq.target / 10).toFixed(1)} km/h`, 'tx');
           this._queueSpeed(seq.target);
           this._finishStart(seq);
         }, this.cfg.speedConfirmMs));
       } else {
-        this.log('Démarrage FitShow (Start 53 01)...', 'tx');
+        this.log('Starting (FitShow: Start 53 01)...', 'tx');
         this.enqueue(CMD.START, 'action');
         seq.timers.push(this.setTimeout(() => {
           if (this.startSeq !== seq || seq.speedSent) return;
-          this.log('Le tapis n\'a pas signalé de démarrage. Aucun nouvel essai automatique — vérifiez la clé de sécurité / l\'écran puis réessayez.', 'err');
+          this.log('The treadmill did not start. Check the safety key and the display, then press Start again (no automatic retry).', 'err');
           this._finishStart(seq);
           this.onUpdate('status');
         }, this.cfg.startTimeoutMs));
@@ -409,7 +409,7 @@
     _sendTargetIfNeeded(seq) {
       const actual = Math.round(this.state.speed * 10);
       if (actual !== seq.target) {
-        this.log(`Consigne de vitesse : ${(seq.target / 10).toFixed(1)} km/h`, 'tx');
+        this.log(`Target speed: ${(seq.target / 10).toFixed(1)} km/h`, 'tx');
         this._queueSpeed(seq.target);
       }
       // Une seule reconfirmation si la vitesse réelle n'a pas suivi
@@ -458,7 +458,7 @@
 
     wake() {
       if (!this.state.connected) return;
-      this.log('Réveil du tapis...', 'tx');
+      this.log('Waking the treadmill...', 'tx');
       this.enqueue(CMD.WAKE, 'action');
     }
 
@@ -466,7 +466,7 @@
     // immédiatement, sans attendre le heartbeat.
     stop() {
       if (!this.state.connected) return Promise.resolve();
-      this.log('Envoi Stop...', 'tx');
+      this.log('Sending Stop...', 'tx');
       this.lastStopAt = this.now();
       this._cancelStart();
       this._cancelStopVerify();
@@ -481,7 +481,7 @@
           const code = this.state.statusCode;
           const stillGoing = code === STATUS.RUNNING || code === STATUS.START;
           if (stillGoing && seq.attempts < this.cfg.stopMaxAttempts) {
-            this.log('Le tapis tourne encore : nouvel envoi de Stop', 'err');
+            this.log('Belt still moving: sending Stop again', 'err');
             send();
           } else {
             this._cancelStopVerify();

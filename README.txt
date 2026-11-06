@@ -1,23 +1,23 @@
-Contenu du dossier à déployer en HTTPS (GitHub Pages, Netlify, etc.) :
+Files to deploy over HTTPS (GitHub Pages, Netlify, etc.):
 
-  index.html       — l'application
-  treadmill-core.js — protocole FitShow (chargé par index.html)
-  manifest.json    — manifest PWA
-  sw.js            — service worker (nécessaire pour l'installation)
-  icon-192.png     — icône 192×192
-  icon-512.png     — icône 512×512
+  index.html        - the app
+  treadmill-core.js - FitShow protocol (loaded by index.html)
+  manifest.json     - PWA manifest
+  sw.js             - service worker (required for installation)
+  icon-192.png      - 192x192 icon
+  icon-512.png      - 512x512 icon
 
-Les 6 fichiers doivent être à la RACINE du dossier servi
-(pas dans un sous-dossier, sinon les chemins relatifs ne fonctionnent pas).
+All 6 files must be at the ROOT of the served folder
+(not in a subfolder, otherwise the relative paths break).
 
-Pour tester en local :
+To test locally:
   python3 -m http.server 8000
-  puis ouvrir http://localhost:8000/
+  then open http://localhost:8000/
 
-Pour GitHub Pages :
-  1. Créer un repo, uploader les 6 fichiers à la racine
-  2. Settings > Pages > Source : main / root
-  3. Attendre 1 min, ouvrir l'URL https://<vous>.github.io/<repo>/
+GitHub Pages:
+  1. Create a repo, upload the 6 files to the root
+  2. Settings > Pages > Source: main / root
+  3. Wait 1 min, open https://<you>.github.io/<repo>/
 
-Pour Netlify Drop :
-  glisser-déposer le dossier entier sur https://app.netlify.com/drop
+Netlify Drop:
+  drag and drop the whole folder onto https://app.netlify.com/drop

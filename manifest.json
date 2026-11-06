@@ -1,7 +1,8 @@
 {
-  "name": "Tapis LJJ",
-  "short_name": "Tapis",
-  "description": "Contrôle tapis de marche LJJ-0811FE via Bluetooth",
+  "name": "LJJ Treadmill",
+  "short_name": "Treadmill",
+  "description": "Bluetooth control for LJJ-0811FE and FitShow walking pads",
+  "lang": "en",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
